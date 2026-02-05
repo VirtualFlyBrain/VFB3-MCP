@@ -277,6 +277,12 @@ class VFBMCPServer {
         res.status(404).json({ error: 'Registration not required' });
       });
 
+      // Add GET /mcp for server discovery
+      app.get('/mcp', (req: any, res: any) => {
+        console.error('MCP Debug: Responding to GET /mcp discovery request');
+        res.status(200).json({ status: 'MCP server ready', version: version });
+      });
+
       // Debug logging for HTTP requests
       app.use((req: any, res: any, next: any) => {
         console.error('MCP Debug: HTTP request:', req.method, req.url, 'from', req.ip, 'headers:', JSON.stringify(req.headers));
