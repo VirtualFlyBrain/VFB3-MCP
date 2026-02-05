@@ -10,8 +10,6 @@ import {
 import axios from 'axios';
 import cors from 'cors';
 import express from 'express';
-import { mcpAuthMetadataRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
-import { OAuthMetadata } from '@modelcontextprotocol/sdk/shared/auth.js';
 
 class VFBMCPServer {
   private server: Server;
@@ -225,27 +223,9 @@ class VFBMCPServer {
       // Enable CORS for MCP over HTTP
       mainApp.use(cors());
 
-      // Configure OAuth metadata (even though we don't require auth)
-      // Use HTTPS issuer URL for MCP SDK compatibility (server runs behind reverse proxy)
-      // ISSUER_URL is the public-facing URL; HOST is only for binding and must not be used here
-      const issuerUrl = process.env.ISSUER_URL || 'https://vfb3-mcp.virtualflybrain.org';
-      const mcpServerUrl = new URL(issuerUrl);
-      const oauthMetadata: OAuthMetadata = {
-        issuer: issuerUrl,
-        authorization_endpoint: `${issuerUrl}/oauth/authorize`,
-        token_endpoint: `${issuerUrl}/oauth/token`,
-        response_types_supported: ['code'],
-      };
-
-      // Add MCP auth metadata router (provides OAuth discovery endpoints)
-      mainApp.use(
-        mcpAuthMetadataRouter({
-          oauthMetadata,
-          resourceServerUrl: mcpServerUrl,
-          scopesSupported: ['mcp:tools'],
-          resourceName: 'VFB3-MCP Server',
-        }),
-      );
+      // No OAuth metadata - this server is publicly accessible without authentication.
+      // Omitting auth discovery endpoints signals to MCP clients (like Claude) that
+      // no authentication is required, so they connect directly.
 
       // Handle browser requests to root
       mainApp.get('/', (req: any, res: any, next: any) => {
@@ -288,31 +268,6 @@ class VFBMCPServer {
 
       // Mount MCP at root (/) - Claude Desktop expects MCP at the server root
       mainApp.use('/', mcpApp);
-
-      // Add OAuth discovery proxy for Claude Desktop compatibility
-      mainApp.get('/.well-known/oauth-protected-resource/mcp', async (req: any, res: any) => {
-        try {
-          // Return the same OAuth metadata
-          res.json({
-            resource: issuerUrl,
-            authorization_servers: [issuerUrl],
-            scopes_supported: ['mcp:tools']
-          });
-        } catch (error) {
-          console.error('MCP Debug: Error returning OAuth discovery:', error);
-          res.status(500).json({ error: 'OAuth discovery failed' });
-        }
-      });
-
-      mainApp.get('/.well-known/oauth-authorization-server/mcp', async (req: any, res: any) => {
-        try {
-          // Return the OAuth authorization server metadata
-          res.json(oauthMetadata);
-        } catch (error) {
-          console.error('MCP Debug: Error returning OAuth auth server:', error);
-          res.status(500).json({ error: 'OAuth auth server discovery failed' });
-        }
-      });
 
       // Debug logging for HTTP requests
       mainApp.use((req: any, res: any, next: any) => {
