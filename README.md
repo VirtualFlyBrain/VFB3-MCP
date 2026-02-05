@@ -86,6 +86,8 @@ docker-compose up --build
 docker build -t vfb3-mcp .
 ```
 
+The Dockerfile automatically builds the TypeScript source code during the container build process, so no separate compilation step is needed.
+
 ### Run Docker Container
 
 ```bash
@@ -105,6 +107,7 @@ docker pull virtualflybrain/vfb3-mcp:latest
 This project uses GitHub Actions for automated building and deployment:
 
 - **Automated Builds**: Docker images are built on every push to any branch
+- **TypeScript Compilation**: Source code is compiled during the Docker build process
 - **Docker Hub Publishing**: Images are automatically published to `virtualflybrain/vfb3-mcp`
 - **Smart Tagging**: 
   - Branch names for development builds
