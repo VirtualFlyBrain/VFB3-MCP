@@ -256,47 +256,40 @@ class VFBMCPServer {
         }
       });
 
-      // Handle browser requests to root
-      app.get('/', (req: any, res: any, next: any) => {
-        if (req.headers.accept && req.headers.accept.includes('text/html')) {
-          res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <title>VFB3-MCP Server</title>
-              <style>
-                body { font-family: Arial, sans-serif; margin: 40px; }
-                h1 { color: #333; }
-                p { line-height: 1.6; }
-              </style>
-            </head>
-            <body>
-              <h1>Virtual Fly Brain MCP Server v${version}</h1>
-              <p>This is a Model Context Protocol (MCP) server providing access to Virtual Fly Brain (VFB) data and APIs.</p>
-              <p><strong>Available Tools:</strong></p>
-              <ul>
-                <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
-                <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
-                <li><code>search_terms</code> - Search for VFB terms using the Solr search server</li>
-              </ul>
-              <p>This endpoint is for MCP clients. For more information, visit <a href="https://virtualflybrain.org">Virtual Fly Brain</a>.</p>
-            </body>
-            </html>
-          `);
-        } else {
-          next(); // Let MCP handle it
-        }
-      });
-
-      // OAuth discovery endpoints - return metadata indicating no auth required
+      // OAuth discovery endpoints - provide dummy auth for open server
       app.get('/.well-known/oauth-protected-resource', (req: any, res: any) => {
-        console.error('MCP Debug: Responding to oauth-protected-resource request with no auth metadata');
-        res.status(200).json({ authorization_servers: [] });
+        console.error('MCP Debug: Responding to oauth-protected-resource request with dummy auth metadata');
+        res.status(200).json({ authorization_servers: ['https://vfb3-mcp.virtualflybrain.org'] });
       });
 
       app.get('/.well-known/oauth-authorization-server', (req: any, res: any) => {
-        console.error('MCP Debug: Responding to oauth-authorization-server request with 404');
-        res.status(404).json({ error: 'No authorization server configured' });
+        console.error('MCP Debug: Responding to oauth-authorization-server request with dummy auth server metadata');
+        res.status(200).json({
+          issuer: 'https://vfb3-mcp.virtualflybrain.org',
+          authorization_endpoint: 'https://vfb3-mcp.virtualflybrain.org/oauth/authorize',
+          token_endpoint: 'https://vfb3-mcp.virtualflybrain.org/oauth/token',
+          response_types_supported: ['code'],
+          grant_types_supported: ['authorization_code'],
+          token_endpoint_auth_methods_supported: ['none']
+        });
+      });
+
+      // Dummy OAuth endpoints for open server
+      app.get('/oauth/authorize', (req: any, res: any) => {
+        console.error('MCP Debug: Handling dummy authorize request');
+        const redirectUri = req.query.redirect_uri;
+        const state = req.query.state;
+        const code = 'dummy_code';
+        res.redirect(`${redirectUri}?code=${code}&state=${state}`);
+      });
+
+      app.post('/oauth/token', (req: any, res: any) => {
+        console.error('MCP Debug: Handling dummy token request');
+        res.json({
+          access_token: 'dummy_token',
+          token_type: 'Bearer',
+          expires_in: 3600
+        });
       });
 
       app.post('/register', (req: any, res: any) => {
