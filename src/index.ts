@@ -111,6 +111,8 @@ class VFBMCPServer {
         );
       }
     });
+
+    // Auth handlers - removed as not valid
   }
 
   private async handleGetTermInfo(args: { id: string }) {
@@ -219,6 +221,12 @@ class VFBMCPServer {
 
       // Enable CORS for MCP over HTTP
       app.use(cors());
+
+      // Debug logging for HTTP requests
+      app.use((req: any, res: any, next: any) => {
+        console.error('MCP Debug: HTTP request:', req.method, req.url, 'from', req.ip, 'headers:', JSON.stringify(req.headers));
+        next();
+      });
 
       app.listen(parseInt(port), () => {
         console.error(`MCP Debug: VFB MCP Server running on HTTP port ${port}`);
