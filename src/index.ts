@@ -9,6 +9,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
 import cors from 'cors';
+import express from 'express';
 
 class VFBMCPServer {
   private server: Server;
@@ -216,16 +217,14 @@ class VFBMCPServer {
     if (mode === 'http') {
       // HTTP mode using Express
       console.error('MCP Debug: Starting VFB3-MCP server v' + version + ' in HTTP mode on port', port);
-      const app = createMcpExpressApp({
-        host: process.env.HOST || '0.0.0.0',
-        allowedHosts: ['vfb3-mcp.virtualflybrain.org', 'localhost', '127.0.0.1']
-      });
+
+      const mainApp = express();
 
       // Enable CORS for MCP over HTTP
-      app.use(cors());
+      mainApp.use(cors());
 
       // Handle browser requests to root
-      app.get('/', (req: any, res: any, next: any) => {
+      mainApp.get('/', (req: any, res: any, next: any) => {
         if (req.headers.accept && req.headers.accept.includes('text/html')) {
           res.send(`
             <!DOCTYPE html>
@@ -257,39 +256,37 @@ class VFBMCPServer {
       });
 
       // OAuth discovery endpoints - return 404 to indicate no auth required
-      app.get('/.well-known/oauth-protected-resource', (req: any, res: any) => {
+      mainApp.get('/.well-known/oauth-protected-resource', (req: any, res: any) => {
         console.error('MCP Debug: Responding to oauth-protected-resource request with 404');
         res.status(404).json({ error: 'No OAuth protection configured' });
       });
 
-      app.get('/.well-known/oauth-authorization-server', (req: any, res: any) => {
+      mainApp.get('/.well-known/oauth-authorization-server', (req: any, res: any) => {
         console.error('MCP Debug: Responding to oauth-authorization-server request with 404');
         res.status(404).json({ error: 'No authorization server configured' });
       });
 
-      app.post('/register', (req: any, res: any) => {
+      mainApp.post('/register', (req: any, res: any) => {
         console.error('MCP Debug: Responding to register request with 404');
         res.status(404).json({ error: 'Registration not required' });
       });
 
-      app.post('/register', (req: any, res: any) => {
-        console.error('MCP Debug: Responding to register request with 404');
-        res.status(404).json({ error: 'Registration not required' });
+      // Create MCP app
+      const mcpApp = createMcpExpressApp({
+        host: process.env.HOST || '0.0.0.0',
+        allowedHosts: ['vfb3-mcp.virtualflybrain.org', 'localhost', '127.0.0.1']
       });
 
-      // Add GET /mcp for server discovery
-      app.get('/mcp', (req: any, res: any) => {
-        console.error('MCP Debug: Responding to GET /mcp discovery request');
-        res.status(200).json({ status: 'MCP server ready', version: version });
-      });
+      // Mount MCP at /mcp
+      mainApp.use('/mcp', mcpApp);
 
       // Debug logging for HTTP requests
-      app.use((req: any, res: any, next: any) => {
+      mainApp.use((req: any, res: any, next: any) => {
         console.error('MCP Debug: HTTP request:', req.method, req.url, 'from', req.ip, 'headers:', JSON.stringify(req.headers));
         next();
       });
 
-      app.listen(parseInt(port), () => {
+      mainApp.listen(parseInt(port), () => {
         console.error(`MCP Debug: VFB MCP Server running on HTTP port ${port}`);
       });
     } else {
