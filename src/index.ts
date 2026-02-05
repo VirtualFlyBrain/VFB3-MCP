@@ -266,9 +266,14 @@ class VFBMCPServer {
       mainApp.use('/mcp', mcpApp);
 
       // OAuth discovery endpoints - return 404 to indicate no auth required
-      // Per MCP spec, these should be at server root
+      // Per MCP spec, these should be at server root, but Claude Desktop expects them with /mcp appended
       mainApp.get('/.well-known/oauth-protected-resource', (req: any, res: any) => {
         console.error('MCP Debug: Responding to oauth-protected-resource request with 404');
+        res.status(404).json({ error: 'No OAuth protection configured' });
+      });
+
+      mainApp.get('/.well-known/oauth-protected-resource/mcp', (req: any, res: any) => {
+        console.error('MCP Debug: Responding to oauth-protected-resource/mcp request with 404');
         res.status(404).json({ error: 'No OAuth protection configured' });
       });
 
@@ -277,8 +282,18 @@ class VFBMCPServer {
         res.status(404).json({ error: 'No authorization server configured' });
       });
 
+      mainApp.get('/.well-known/oauth-authorization-server/mcp', (req: any, res: any) => {
+        console.error('MCP Debug: Responding to oauth-authorization-server/mcp request with 404');
+        res.status(404).json({ error: 'No authorization server configured' });
+      });
+
       mainApp.post('/register', (req: any, res: any) => {
         console.error('MCP Debug: Responding to register request with 404');
+        res.status(404).json({ error: 'Registration not required' });
+      });
+
+      mainApp.post('/register/mcp', (req: any, res: any) => {
+        console.error('MCP Debug: Responding to register/mcp request with 404');
         res.status(404).json({ error: 'Registration not required' });
       });
 
