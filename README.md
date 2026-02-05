@@ -92,6 +92,28 @@ docker build -t vfb3-mcp .
 docker run -it vfb3-mcp
 ```
 
+### Docker Hub
+
+Pre-built images are available on Docker Hub:
+
+```bash
+docker pull virtualflybrain/vfb3-mcp:latest
+```
+
+## CI/CD
+
+This project uses GitHub Actions for automated building and deployment:
+
+- **Automated Builds**: Docker images are built on every push to any branch
+- **Docker Hub Publishing**: Images are automatically published to `virtualflybrain/vfb3-mcp`
+- **Branch Tagging**: Images are tagged with the branch name (e.g., `main`, `feature-branch`)
+
+### Required Secrets
+
+To enable Docker Hub publishing, set these repository secrets:
+- `DOCKER_HUB_USER`: Your Docker Hub username
+- `DOCKER_HUB_PASSWORD`: Your Docker Hub password or access token
+
 ## API Tools
 
 ### get_term_info
