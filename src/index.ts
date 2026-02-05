@@ -246,17 +246,6 @@ class VFBMCPServer {
         }),
       );
 
-      // Also mount auth router at /mcp for Claude Desktop compatibility
-      mainApp.use(
-        '/mcp',
-        mcpAuthMetadataRouter({
-          oauthMetadata,
-          resourceServerUrl: mcpServerUrl,
-          scopesSupported: ['mcp:tools'],
-          resourceName: 'VFB3-MCP Server',
-        }),
-      );
-
       // Handle browser requests to root
       mainApp.get('/', (req: any, res: any, next: any) => {
         if (req.headers.accept && req.headers.accept.includes('text/html')) {
@@ -274,7 +263,7 @@ class VFBMCPServer {
             <body>
               <h1>Virtual Fly Brain MCP Server v${version}</h1>
               <p>This is a Model Context Protocol (MCP) server providing access to Virtual Fly Brain (VFB) data and APIs.</p>
-              <p><strong>MCP Endpoint:</strong> <code>/mcp</code></p>
+              <p><strong>MCP Endpoint:</strong> <code>/</code> (server root)</p>
               <p><strong>Available Tools:</strong></p>
               <ul>
                 <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
@@ -296,15 +285,15 @@ class VFBMCPServer {
         allowedHosts: ['vfb3-mcp.virtualflybrain.org', 'localhost', '127.0.0.1']
       });
 
-      // Mount MCP at /mcp
-      mainApp.use('/mcp', mcpApp);
+      // Mount MCP at root (/) - Claude Desktop expects MCP at the server root
+      mainApp.use('/', mcpApp);
 
       // Add OAuth discovery proxy for Claude Desktop compatibility
       mainApp.get('/.well-known/oauth-protected-resource/mcp', async (req: any, res: any) => {
         try {
           // Return the same OAuth metadata
           res.json({
-            resource: `${issuerUrl}/mcp`,
+            resource: issuerUrl,
             authorization_servers: [issuerUrl],
             scopes_supported: ['mcp:tools']
           });
