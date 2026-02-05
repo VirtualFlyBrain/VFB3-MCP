@@ -256,40 +256,20 @@ class VFBMCPServer {
         }
       });
 
-      // OAuth discovery endpoints - provide dummy auth for open server
+      // OAuth discovery endpoints - return 404 to indicate no auth required
       app.get('/.well-known/oauth-protected-resource', (req: any, res: any) => {
-        console.error('MCP Debug: Responding to oauth-protected-resource request with dummy auth metadata');
-        res.status(200).json({ authorization_servers: ['https://vfb3-mcp.virtualflybrain.org'] });
+        console.error('MCP Debug: Responding to oauth-protected-resource request with 404');
+        res.status(404).json({ error: 'No OAuth protection configured' });
       });
 
       app.get('/.well-known/oauth-authorization-server', (req: any, res: any) => {
-        console.error('MCP Debug: Responding to oauth-authorization-server request with dummy auth server metadata');
-        res.status(200).json({
-          issuer: 'https://vfb3-mcp.virtualflybrain.org',
-          authorization_endpoint: 'https://vfb3-mcp.virtualflybrain.org/oauth/authorize',
-          token_endpoint: 'https://vfb3-mcp.virtualflybrain.org/oauth/token',
-          response_types_supported: ['code'],
-          grant_types_supported: ['authorization_code'],
-          token_endpoint_auth_methods_supported: ['none']
-        });
+        console.error('MCP Debug: Responding to oauth-authorization-server request with 404');
+        res.status(404).json({ error: 'No authorization server configured' });
       });
 
-      // Dummy OAuth endpoints for open server
-      app.get('/oauth/authorize', (req: any, res: any) => {
-        console.error('MCP Debug: Handling dummy authorize request');
-        const redirectUri = req.query.redirect_uri;
-        const state = req.query.state;
-        const code = 'dummy_code';
-        res.redirect(`${redirectUri}?code=${code}&state=${state}`);
-      });
-
-      app.post('/oauth/token', (req: any, res: any) => {
-        console.error('MCP Debug: Handling dummy token request');
-        res.json({
-          access_token: 'dummy_token',
-          token_type: 'Bearer',
-          expires_in: 3600
-        });
+      app.post('/register', (req: any, res: any) => {
+        console.error('MCP Debug: Responding to register request with 404');
+        res.status(404).json({ error: 'Registration not required' });
       });
 
       app.post('/register', (req: any, res: any) => {
