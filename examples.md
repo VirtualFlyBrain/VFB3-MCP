@@ -46,21 +46,32 @@ This file contains examples of how to use the VFB3-MCP server tools.
 
 ## Integration with MCP Clients
 
+### Claude Desktop
+Add to your MCP server configuration:
+```json
+{
+  "mcpServers": {
+    "vfb3-mcp": {
+      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+    }
+  }
+}
+```
+
 ### Claude Code
 Add to your `claude.json`:
 ```json
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/VFB3-MCP/dist/index.js"]
+      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
     }
   }
 }
 ```
 
 ### GitHub Copilot
-Configure the MCP server endpoint in your Copilot settings pointing to the running server.
+Configure the MCP server URL in your Copilot settings pointing to `https://vfb3-mcp.virtualflybrain.org/mcp`.
 
 ## Docker Usage
 ```bash

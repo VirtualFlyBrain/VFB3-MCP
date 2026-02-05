@@ -240,13 +240,14 @@ class VFBMCPServer {
             <body>
               <h1>Virtual Fly Brain MCP Server v${version}</h1>
               <p>This is a Model Context Protocol (MCP) server providing access to Virtual Fly Brain (VFB) data and APIs.</p>
+              <p><strong>MCP Endpoint:</strong> <code>/mcp</code></p>
               <p><strong>Available Tools:</strong></p>
               <ul>
                 <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
                 <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
                 <li><code>search_terms</code> - Search for VFB terms using the Solr search server</li>
               </ul>
-              <p>This endpoint is for MCP clients. For more information, visit <a href="https://virtualflybrain.org">Virtual Fly Brain</a>.</p>
+              <p>This server is designed for MCP clients like Claude Desktop. For more information, visit <a href="https://virtualflybrain.org">Virtual Fly Brain</a>.</p>
             </body>
             </html>
           `);
