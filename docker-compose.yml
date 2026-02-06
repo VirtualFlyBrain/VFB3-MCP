@@ -28,3 +28,6 @@ services:
       - MCP_MODE=http
       - PORT=3000
       - HOST=0.0.0.0
+      # GA4 Analytics (optional - set to enable usage tracking)
+      - GA_MEASUREMENT_ID=
+      - GA_API_SECRET=

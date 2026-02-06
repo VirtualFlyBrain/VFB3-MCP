@@ -41,6 +41,19 @@ spec:
           value: "3000"
         - name: HOST
           value: "0.0.0.0"
+        # GA4 Analytics (optional)
+        - name: GA_MEASUREMENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: vfb3-mcp-analytics
+              key: ga-measurement-id
+              optional: true
+        - name: GA_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: vfb3-mcp-analytics
+              key: ga-api-secret
+              optional: true
         volumeMounts:
         - name: tmp-volume
           mountPath: /tmp

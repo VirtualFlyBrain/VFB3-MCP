@@ -28,5 +28,9 @@ ENV MCP_MODE=http
 ENV PORT=3000
 ENV HOST=0.0.0.0
 
+# GA4 Analytics (optional - set at runtime to enable)
+# ENV GA_MEASUREMENT_ID=
+# ENV GA_API_SECRET=
+
 # Run the application
 CMD ["npm", "start"]
