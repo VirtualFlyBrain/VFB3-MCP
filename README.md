@@ -13,7 +13,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 1. **Open Claude Desktop** and go to Settings
 2. **Navigate to the MCP section**
 3. **Add a new MCP server** with these settings:
-   - **Server Name**: `vfb3-mcp` (or any name you prefer)
+   - **Server Name**: `virtual-fly-brain` (or any name you prefer)
    - **Type**: HTTP
    - **Server URL**: `https://vfb3-mcp.virtualflybrain.org`
 
@@ -21,7 +21,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 ```json
 {
   "mcpServers": {
-    "vfb3-mcp": {
+    "virtual-fly-brain": {
       "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
@@ -38,7 +38,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 ```json
 {
   "mcpServers": {
-    "vfb3-mcp": {
+    "virtual-fly-brain": {
       "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
@@ -63,7 +63,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 3. **Type "MCP: Add server"** and select it
 4. **Choose "HTTP"** as the server type
 5. **Enter the server details**:
-   - **Name**: `vfb3-mcp`
+   - **Name**: `virtual-fly-brain`
    - **URL**: `https://vfb3-mcp.virtualflybrain.org`
 6. **Save and restart** VS Code if prompted
 
@@ -74,7 +74,7 @@ For any MCP-compatible client that supports HTTP servers:
 ```json
 {
   "mcpServers": {
-    "vfb3-mcp": {
+    "virtual-fly-brain": {
       "url": "https://vfb3-mcp.virtualflybrain.org",
       "type": "http"
     }
