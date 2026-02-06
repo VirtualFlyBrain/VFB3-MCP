@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.3.0';
+const VERSION = '1.2.1';
 
 function setupToolHandlers(server: Server) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
