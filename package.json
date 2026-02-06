@@ -1,6 +1,6 @@
 {
   "name": "vfb3-mcp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "MCP server for VirtualFlyBrain API integration",
   "main": "index.js",
   "scripts": {

@@ -13,7 +13,7 @@ import {
 import axios from 'axios';
 import cors from 'cors';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 
 // Custom params serializer to handle array params as repeated keys (e.g. fq=a&fq=b)
 // Axios defaults to bracket notation (fq[]=a&fq[]=b) which Solr doesn't understand
@@ -290,6 +290,49 @@ async function main() {
               <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
               <li><code>search_terms</code> - Search for VFB terms using the Solr search server (supports type-based filtering via filter_types, exclude_types, and boost_types parameters)</li>
             </ul>
+            
+            <h2>MCP Client Configuration</h2>
+            <p>To use this MCP server with your preferred MCP client, add the following configuration:</p>
+            
+            <h3>Claude Desktop</h3>
+            <p>Add to your MCP server configuration:</p>
+            <pre><code>{
+  "mcpServers": {
+    "vfb3-mcp": {
+      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+    }
+  }
+}</code></pre>
+            
+            <h3>Claude Code</h3>
+            <p>Add to your <code>claude.json</code>:</p>
+            <pre><code>{
+  "mcpServers": {
+    "vfb3-mcp": {
+      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+    }
+  }
+}</code></pre>
+            
+            <h3>GitHub Copilot</h3>
+            <p>Configure the MCP server URL in your Copilot settings to point to:</p>
+            <pre><code>https://vfb3-mcp.virtualflybrain.org/mcp</code></pre>
+            
+            <h3>Visual Studio Code</h3>
+            <p>Add the server using the MCP extension:</p>
+            <ol>
+              <li>Press <code>Cmd + Shift + P</code> (macOS) or <code>Ctrl + Shift + P</code> (Windows/Linux) and select <strong>MCP: Add server…</strong></li>
+              <li>Select <strong>HTTP</strong> and enter <code>https://vfb3-mcp.virtualflybrain.org</code></li>
+              <li>Give the server a unique name (e.g., "virtual-fly-brain")</li>
+            </ol>
+            <p>In your <code>mcp.json</code> configuration file, you should now see an entry like this:</p>
+            <pre><code>{
+  "virtual-fly-brain": {
+    "url": "https://vfb3-mcp.virtualflybrain.org",
+    "type": "http"
+  }
+}</code></pre>
+            
             <p>This server is designed for MCP clients like Claude Desktop. For more information, visit <a href="https://virtualflybrain.org">Virtual Fly Brain</a>.</p>
           </body>
           </html>

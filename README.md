@@ -98,6 +98,21 @@ The recommended way to use VFB3-MCP is through the live production service:
 
 **For GitHub Copilot** - Configure the MCP server URL in your Copilot settings to point to `https://vfb3-mcp.virtualflybrain.org`.
 
+**For Visual Studio Code** - Add the server using the MCP extension:
+1. Press `Cmd + Shift + P` (macOS) or `Ctrl + Shift + P` (Windows/Linux) and select **MCP: Add server…**
+2. Select **HTTP** and enter `https://vfb3-mcp.virtualflybrain.org`
+3. Give the server a unique name (e.g., "virtual-fly-brain")
+
+In your `mcp.json` configuration file, you should now see an entry like this:
+```json
+{
+  "virtual-fly-brain": {
+    "url": "https://vfb3-mcp.virtualflybrain.org",
+    "type": "http"
+  }
+}
+```
+
 ### Local Development
 
 For development or testing, you can run the server locally:
