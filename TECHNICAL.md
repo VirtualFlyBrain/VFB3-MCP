@@ -94,23 +94,33 @@ Located in `.github/workflows/docker.yml`:
 3. Automated publishing to Docker Hub
 4. Kubernetes deployment triggers (manual/auto)
 
-## Development
+### Development Setup
 
-### Project Structure
+#### Prerequisites
+- Node.js 18 or higher
+- npm or yarn
 
-```
-VFB3-MCP/
-├── src/
-│   └── index.ts          # Main server implementation
-├── dist/                 # Compiled JavaScript (generated)
-├── Dockerfile            # Multi-arch Docker configuration
-├── docker-compose.yml    # Local development setup
-├── k8s-deployment.yml    # Production Kubernetes manifest
-├── package.json          # Node.js dependencies and scripts
-├── tsconfig.json         # TypeScript configuration
-├── .github/workflows/    # CI/CD pipeline
-└── docs/                 # Documentation files
-```
+#### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Robbie1977/VFB3-MCP.git
+   cd VFB3-MCP
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Build the project:
+   ```bash
+   npm run build
+   ```
+
+4. Start the server:
+   ```bash
+   npm start
+   ```
 
 ### Development Commands
 
@@ -286,4 +296,4 @@ MCP_DEBUG=true npm start
 
 ## License
 
-ISC License - See main README for details.
+MIT License - See main README for details.

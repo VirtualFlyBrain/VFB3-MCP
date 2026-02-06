@@ -36,51 +36,7 @@ The easiest way to use VFB3-MCP is through our hosted service:
 
 **GitHub Copilot** - Configure the MCP server URL to: `https://vfb3-mcp.virtualflybrain.org`
 
-## 🛠️ Run Locally
-
-### Prerequisites
-
-- Node.js 18 or higher
-- npm or yarn
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Robbie1977/VFB3-MCP.git
-   cd VFB3-MCP
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Build the project:
-   ```bash
-   npm run build
-   ```
-
-4. Start the server:
-   ```bash
-   npm start
-   ```
-
-### Local MCP Configuration
-
-For **Claude Desktop** local development:
-```json
-{
-  "mcpServers": {
-    "vfb3-mcp": {
-      "command": "node",
-      "args": ["/path/to/VFB3-MCP/dist/index.js"]
-    }
-  }
-}
-```
-
-## 📚 Available Tools
+##  Available Tools
 
 ### get_term_info
 Retrieve detailed information about VFB terms using their IDs.
@@ -113,4 +69,4 @@ VirtualFlyBrain (VFB) is a comprehensive knowledge base about *Drosophila melano
 
 ## 📄 License
 
-ISC
+MIT
