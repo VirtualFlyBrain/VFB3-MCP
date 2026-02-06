@@ -20,7 +20,7 @@ class VFBMCPServer {
     this.server = new Server(
       {
         name: 'vfb3-mcp-server',
-        version: '1.1.3',
+        version: '1.1.4',
       },
       {
         capabilities: {
@@ -214,7 +214,7 @@ class VFBMCPServer {
   async run() {
     const port = process.env.PORT || '3000';
     const mode = process.env.MCP_MODE || 'stdio';
-    const version = '1.1.3'; // From package.json
+    const version = '1.1.4'; // From package.json
 
     if (mode === 'http') {
       // HTTP mode using Express
