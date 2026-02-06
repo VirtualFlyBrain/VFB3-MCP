@@ -13,9 +13,67 @@ import {
 import axios from 'axios';
 import cors from 'cors';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
-function createServer(): Server {
+// Custom params serializer to handle array params as repeated keys (e.g. fq=a&fq=b)
+// Axios defaults to bracket notation (fq[]=a&fq[]=b) which Solr doesn't understand
+function serializeParams(params: Record<string, unknown>): string {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        searchParams.append(key, String(v));
+      }
+    } else {
+      searchParams.append(key, String(value));
+    }
+  }
+  return searchParams.toString();
+}
+
+const FALLBACK_FACETS = [
+  'adult', 'anatomy', 'cell', 'cholinergic', 'class', 'cluster', 'dataset',
+  'deprecated', 'dopaminergic', 'expression_pattern', 'expression_pattern_fragment',
+  'fafb', 'fanc', 'feature', 'flycircuit', 'gabaergic', 'gene', 'glutamatergic',
+  'has_image', 'has_neuron_connectivity', 'has_region_connectivity', 'hasscrnaseq',
+  'histaminergic', 'individual', 'l1em', 'larva', 'motor_neuron', 'muscle',
+  'nblast', 'nblastexp', 'nervous_system', 'neuron', 'neuronbridge',
+  'olfactory_system', 'peptidergic', 'primary_neuron', 'pub', 'secondary_neuron',
+  'sensory_neuron', 'serotonergic', 'split', 'synaptic_neuropil',
+  'visual_system', 'vfb',
+];
+
+async function fetchAvailableFacets(): Promise<string[]> {
+  try {
+    const response = await axios.get('https://solr.virtualflybrain.org/solr/ontology/select', {
+      params: {
+        q: '*:*',
+        rows: '0',
+        facet: 'true',
+        'facet.field': 'facets_annotation',
+        'facet.mincount': '1',
+        wt: 'json',
+      },
+    });
+    const facetArray = response.data?.facet_counts?.facet_fields?.facets_annotation;
+    if (Array.isArray(facetArray)) {
+      // Solr returns alternating [name, count, name, count, ...]
+      const names: string[] = [];
+      for (let i = 0; i < facetArray.length; i += 2) {
+        names.push(facetArray[i]);
+      }
+      console.error(`Fetched ${names.length} available facet types from Solr`);
+      return names;
+    }
+    console.error('Unexpected facet response format, using fallback list');
+    return FALLBACK_FACETS;
+  } catch (error) {
+    console.error(`Failed to fetch facets from Solr, using fallback list: ${error}`);
+    return FALLBACK_FACETS;
+  }
+}
+
+function createServer(availableFacets: string[]): Server {
   const server = new Server(
     {
       name: 'vfb3-mcp-server',
@@ -65,13 +123,32 @@ function createServer(): Server {
         },
         {
           name: 'search_terms',
-          description: 'Search for VFB terms using the Solr search server',
+          description: `Search for VFB terms using the Solr search server. Results can be filtered, excluded, or boosted by entity type using facets_annotation values.
+
+Available filter types: ${availableFacets.join(', ')}
+
+Multiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types soft-rank matching results higher without excluding others.`,
           inputSchema: {
             type: 'object',
             properties: {
               query: {
                 type: 'string',
                 description: 'Search query (e.g., medulla)',
+              },
+              filter_types: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Facet types to require. Results must have ALL specified types. Example: ["neuron", "adult", "has_image"]',
+              },
+              exclude_types: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Facet types to exclude. Results must NOT have any of these. Example: ["deprecated", "larva"]',
+              },
+              boost_types: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Facet types to boost in ranking without hard filtering. Example: ["has_image", "has_neuron_connectivity"]',
               },
             },
             required: ['query'],
@@ -104,8 +181,41 @@ function createServer(): Server {
         }
       }
       case 'search_terms': {
-        const { query } = args as { query: string };
+        const { query, filter_types, exclude_types, boost_types } = args as {
+          query: string;
+          filter_types?: string[];
+          exclude_types?: string[];
+          boost_types?: string[];
+        };
         try {
+          // Build filter query clauses - base filter always applies
+          const fqClauses: string[] = [
+            '(short_form:VFB* OR short_form:FB* OR facets_annotation:DataSet OR facets_annotation:pub) AND NOT short_form:VFBc_*',
+          ];
+
+          // Add inclusion filters (AND semantics - each is a separate fq clause)
+          if (filter_types && filter_types.length > 0) {
+            for (const ft of filter_types) {
+              fqClauses.push(`facets_annotation:${ft}`);
+            }
+          }
+
+          // Add exclusion filters
+          if (exclude_types && exclude_types.length > 0) {
+            for (const et of exclude_types) {
+              fqClauses.push(`NOT facets_annotation:${et}`);
+            }
+          }
+
+          // Build boost query - start with base boosts
+          let bq = 'short_form:VFBexp*^10.0 short_form:VFB*^100.0 short_form:FBbt*^100.0 short_form:FBbt_00003982^2 facets_annotation:Deprecated^0.001';
+
+          // Append user-requested boost types
+          if (boost_types && boost_types.length > 0) {
+            const boostClauses = boost_types.map(bt => `facets_annotation:${bt}^500.0`);
+            bq = bq + ' ' + boostClauses.join(' ');
+          }
+
           const response = await axios.get('https://solr.virtualflybrain.org/solr/ontology/select', {
             params: {
               q: `${query} OR ${query}* OR *${query}*`,
@@ -117,11 +227,12 @@ function createServer(): Server {
               fl: 'short_form,label,synonym,id,facets_annotation,unique_facets',
               start: '0',
               pf: 'true',
-              fq: ['(short_form:VFB* OR short_form:FB* OR facets_annotation:DataSet OR facets_annotation:pub) AND NOT short_form:VFBc_*'],
+              fq: fqClauses,
               rows: '150',
               wt: 'json',
-              bq: 'short_form:VFBexp*^10.0 short_form:VFB*^100.0 short_form:FBbt*^100.0 short_form:FBbt_00003982^2 facets_annotation:Deprecated^0.001',
+              bq: bq,
             },
+            paramsSerializer: serializeParams,
           });
           return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
         } catch (error) {
@@ -139,6 +250,9 @@ function createServer(): Server {
 async function main() {
   const port = process.env.PORT || '3000';
   const mode = process.env.MCP_MODE || 'stdio';
+
+  // Fetch available facet types from Solr at startup
+  const availableFacets = await fetchAvailableFacets();
 
   if (mode === 'http') {
     console.error(`Starting VFB3-MCP server v${VERSION} in HTTP mode on port ${port}`);
@@ -172,7 +286,7 @@ async function main() {
             <ul>
               <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
               <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
-              <li><code>search_terms</code> - Search for VFB terms using the Solr search server</li>
+              <li><code>search_terms</code> - Search for VFB terms using the Solr search server (supports type-based filtering via filter_types, exclude_types, and boost_types parameters)</li>
             </ul>
             <p>This server is designed for MCP clients like Claude Desktop. For more information, visit <a href="https://virtualflybrain.org">Virtual Fly Brain</a>.</p>
           </body>
@@ -210,7 +324,7 @@ async function main() {
             }
           };
 
-          const server = createServer();
+          const server = createServer(availableFacets);
           await server.connect(transport);
           await transport.handleRequest(req, res, req.body);
         } else {
@@ -264,7 +378,7 @@ async function main() {
     });
   } else {
     // stdio mode
-    const server = createServer();
+    const server = createServer(availableFacets);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error('VFB MCP Server running on stdio');

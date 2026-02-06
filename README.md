@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB)
 
 ## 🚀 Live Service
 
-**Production Endpoint**: `https://vfb3-mcp.virtualflybrain.org/mcp`
+**Production Endpoint**: `https://vfb3-mcp.virtualflybrain.org`
 
 The VFB3-MCP service is running live on VFB's Rancher/Cattle infrastructure with HTTPS support and automatic SSL certificate management.
 
@@ -16,7 +16,7 @@ For Claude Desktop:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+      "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
 }
@@ -26,7 +26,7 @@ For Claude Desktop:
 
 - **get_term_info**: Retrieve detailed information about VFB terms using their IDs
 - **run_query**: Execute predefined queries on VFB data
-- **search_terms**: Search for VFB terms using the Solr search server with autocomplete functionality
+- **search_terms**: Search for VFB terms using the Solr search server with autocomplete and type-based filtering (filter, exclude, or boost by entity type)
 
 ## About VirtualFlyBrain
 
@@ -70,7 +70,7 @@ VFB enables researchers to explore the complete fly brain at single-neuron resol
 
 The recommended way to use VFB3-MCP is through the live production service:
 
-**Endpoint**: `https://vfb3-mcp.virtualflybrain.org/mcp`
+**Endpoint**: `https://vfb3-mcp.virtualflybrain.org`
 
 #### MCP Client Configuration
 
@@ -79,7 +79,7 @@ The recommended way to use VFB3-MCP is through the live production service:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+      "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
 }
@@ -90,13 +90,13 @@ The recommended way to use VFB3-MCP is through the live production service:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+      "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
 }
 ```
 
-**For GitHub Copilot** - Configure the MCP server URL in your Copilot settings to point to `https://vfb3-mcp.virtualflybrain.org/mcp`.
+**For GitHub Copilot** - Configure the MCP server URL in your Copilot settings to point to `https://vfb3-mcp.virtualflybrain.org`.
 
 ### Local Development
 
@@ -111,7 +111,7 @@ The production service runs in HTTP mode using the MCP SDK's Express transport w
 - **Transport**: Server-Sent Events (SSE) for real-time communication
 - **Authentication**: Open server (no authentication required) - OAuth endpoints return 404
 - **Infrastructure**: Kubernetes deployment on VFB Rancher/Cattle
-- **MCP Endpoint**: `/mcp` (mounted at root level for compatibility)
+- **MCP Endpoint**: `/` (server root)
 
 ### Local Development
 
@@ -140,13 +140,13 @@ For HTTP mode locally:
 MCP_MODE=http PORT=3000 node dist/index.js
 ```
 
-The HTTP server will be available at `http://localhost:3000` with MCP endpoint at `/mcp`.
+The HTTP server will be available at `http://localhost:3000` with MCP endpoint at `/`.
 
 ## Docker
 
 ### Production Deployment
 
-The live service at `https://vfb3-mcp.virtualflybrain.org/mcp` runs these Docker images on Kubernetes.
+The live service at `https://vfb3-mcp.virtualflybrain.org` runs these Docker images on Kubernetes.
 
 ### Build and Run Locally
 
@@ -166,14 +166,14 @@ The Dockerfile automatically builds the TypeScript source code during the contai
 
 The VFB3-MCP service is currently deployed and running at:
 
-**Live Endpoint**: `https://vfb3-mcp.virtualflybrain.org/mcp`
+**Live Endpoint**: `https://vfb3-mcp.virtualflybrain.org`
 
 This production deployment runs in HTTP mode on the VFB Rancher/Cattle infrastructure with:
 - Kubernetes orchestration
 - Automatic SSL certificate management
 - Load balancing and high availability
 - Resource limits and security hardening
-- MCP endpoint mounted at `/mcp` for Claude Desktop compatibility
+- MCP endpoint at server root (`/`)
 
 ### Docker Hub
 
@@ -185,11 +185,11 @@ docker pull virtualflybrain/vfb3-mcp:latest
 
 Images are built for multiple architectures (AMD64 and ARM64) and are automatically tagged based on the branch/PR that triggered the build.
 
-**Production Deployment**: The live service at `https://vfb3-mcp.virtualflybrain.org/mcp` uses these published Docker images deployed via Kubernetes on the VFB Rancher/Cattle infrastructure.
+**Production Deployment**: The live service at `https://vfb3-mcp.virtualflybrain.org` uses these published Docker images deployed via Kubernetes on the VFB Rancher/Cattle infrastructure.
 
 ## CI/CD
 
-This project uses GitHub Actions for automated building and deployment of the Docker images that power the production service at `https://vfb3-mcp.virtualflybrain.org/mcp`.
+This project uses GitHub Actions for automated building and deployment of the Docker images that power the production service at `https://vfb3-mcp.virtualflybrain.org`.
 
 - **Automated Builds**: Docker images are built on every push to any branch
 - **TypeScript Compilation**: Source code is compiled during the Docker build process
@@ -257,15 +257,33 @@ Runs a query on VFB data.
 
 ### search_terms
 
-Searches for VFB terms using the Solr search server.
+Searches for VFB terms using the Solr search server. Supports type-based filtering via `facets_annotation` values, which are fetched dynamically from Solr at server startup.
 
 **Parameters:**
-- `query` (string): Search query (e.g., "medulla")
+- `query` (string, required): Search query (e.g., "medulla")
+- `filter_types` (string[], optional): Facet types to require — results must have ALL specified types. Example: `["neuron", "adult", "has_image"]`
+- `exclude_types` (string[], optional): Facet types to exclude — results must NOT have any of these. Example: `["deprecated", "larva"]`
+- `boost_types` (string[], optional): Facet types to boost in ranking without hard filtering. Example: `["has_image", "has_neuron_connectivity"]`
 
-**Example:**
+**Examples:**
 ```json
 {
   "query": "medulla"
+}
+```
+
+```json
+{
+  "query": "medulla",
+  "filter_types": ["neuron", "adult"],
+  "exclude_types": ["deprecated"]
+}
+```
+
+```json
+{
+  "query": "medulla",
+  "boost_types": ["has_image"]
 }
 ```
 

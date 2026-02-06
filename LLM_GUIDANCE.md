@@ -90,8 +90,31 @@ Returns tabular data from pre-computed analyses:
 
 ### **Search Results Response (`search_terms`)**
 
-Returns entity search results from SOLR:
+Returns entity search results from SOLR. Supports optional type-based filtering:
 
+- **`filter_types`**: Hard include — results must have ALL specified `facets_annotation` values (AND logic)
+- **`exclude_types`**: Hard exclude — results must NOT have any of these types
+- **`boost_types`**: Soft boost — results with these types rank higher without excluding others
+
+Available filter types are loaded dynamically from Solr at server startup, so the tool description always lists current values.
+
+**Basic search:**
+```json
+{
+  "query": "medulla"
+}
+```
+
+**Filtered search (only adult neurons with images):**
+```json
+{
+  "query": "medulla",
+  "filter_types": ["neuron", "adult", "has_image"],
+  "exclude_types": ["deprecated"]
+}
+```
+
+**Response:**
 ```json
 {
   "response": {
@@ -113,7 +136,7 @@ Returns entity search results from SOLR:
 **Key Fields:**
 - **short_form**: VFB/FlyBase identifier
 - **label**: Primary display name
-- **facets_annotation**: Categorization tags
+- **facets_annotation**: Categorization tags (also used for filtering)
 - **id**: Full ontology IRI
 
 ## How to Interpret Image Links
@@ -138,6 +161,9 @@ VFB provides multiple types of images:
 
 ### **1. Start with Search**
 - Use `search_terms` to find relevant entities
+- Use `filter_types` to narrow results by entity type (e.g., `["neuron"]`, `["gene"]`, `["expression_pattern"]`)
+- Use `exclude_types` to remove unwanted results (e.g., `["deprecated"]`)
+- Use `boost_types` to prioritize results with useful data (e.g., `["has_image", "has_neuron_connectivity"]`)
 - Look for entities with useful Tags (has_image, has_neuron_connectivity)
 
 ### **2. Get Detailed Information**
@@ -191,10 +217,13 @@ VFB provides multiple types of images:
 6. **Suggest visualizations** - Direct to image links when relevant
 
 ### **Common Query Patterns**
-- Gene expression: Search for gene name → get_term_info → run PaintedDomains query
-- Neuron morphology: Search for neuron type → get_term_info → check for SimilarMorphology
-- Brain regions: Search for anatomical terms → explore hierarchical relationships
-- Connectivity: Find neurons with has_neuron_connectivity tag → run Connectivity queries
+- Gene expression: Search for gene name with `filter_types: ["gene"]` → get_term_info → run PaintedDomains query
+- Neuron morphology: Search for neuron type with `filter_types: ["neuron"]` → get_term_info → check for SimilarMorphology
+- Adult neurons with images: Search with `filter_types: ["neuron", "adult", "has_image"]`
+- Brain regions: Search for anatomical terms with `filter_types: ["anatomy"]` → explore hierarchical relationships
+- Connectivity: Search with `filter_types: ["has_neuron_connectivity"]` → run Connectivity queries
+- Datasets: Search with `filter_types: ["dataset"]` to find available datasets
+- Exclude noise: Always consider `exclude_types: ["deprecated"]` to remove obsolete entities
 
 ### **Error Handling**
 - If search returns no results, try alternative spellings or broader terms

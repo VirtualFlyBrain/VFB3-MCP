@@ -31,7 +31,7 @@ This file contains examples of how to use the VFB3-MCP server tools.
 }
 ```
 
-### 3. Search Terms
+### 3. Search Terms (basic)
 ```json
 {
   "method": "tools/call",
@@ -39,6 +39,35 @@ This file contains examples of how to use the VFB3-MCP server tools.
     "name": "search_terms",
     "arguments": {
       "query": "medulla"
+    }
+  }
+}
+```
+
+### 4. Search Terms (with type filtering)
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search_terms",
+    "arguments": {
+      "query": "medulla",
+      "filter_types": ["neuron", "adult"],
+      "exclude_types": ["deprecated"]
+    }
+  }
+}
+```
+
+### 5. Search Terms (with boost)
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search_terms",
+    "arguments": {
+      "query": "medulla",
+      "boost_types": ["has_image", "has_neuron_connectivity"]
     }
   }
 }
@@ -52,7 +81,7 @@ Add to your MCP server configuration:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+      "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
 }
@@ -64,14 +93,14 @@ Add to your `claude.json`:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org/mcp"
+      "url": "https://vfb3-mcp.virtualflybrain.org"
     }
   }
 }
 ```
 
 ### GitHub Copilot
-Configure the MCP server URL in your Copilot settings pointing to `https://vfb3-mcp.virtualflybrain.org/mcp`.
+Configure the MCP server URL in your Copilot settings pointing to `https://vfb3-mcp.virtualflybrain.org`.
 
 ## Docker Usage
 ```bash
