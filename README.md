@@ -111,7 +111,7 @@ The production service runs in HTTP mode using the MCP SDK's Express transport w
 - **Transport**: Server-Sent Events (SSE) for real-time communication
 - **Authentication**: Open server (no authentication required) - OAuth endpoints return 404
 - **Infrastructure**: Kubernetes deployment on VFB Rancher/Cattle
-- **MCP Endpoint**: `/mcp` (mounted at root level for compatibility)
+- **MCP Endpoint**: `/` (root path)
 
 ### Local Development
 
@@ -140,7 +140,7 @@ For HTTP mode locally:
 MCP_MODE=http PORT=3000 node dist/index.js
 ```
 
-The HTTP server will be available at `http://localhost:3000` with MCP endpoint at `/mcp`.
+The HTTP server will be available at `http://localhost:3000` with MCP endpoint at `/`.
 
 ## Docker
 
@@ -173,7 +173,7 @@ This production deployment runs in HTTP mode on the VFB Rancher/Cattle infrastru
 - Automatic SSL certificate management
 - Load balancing and high availability
 - Resource limits and security hardening
-- MCP endpoint mounted at `/mcp` for Claude Desktop compatibility
+- MCP endpoint mounted at `/` (root path)
 
 ### Docker Hub
 
