@@ -148,7 +148,9 @@ async function main() {
       allowedHosts: ['vfb3-mcp.virtualflybrain.org', 'localhost', '127.0.0.1'],
     });
 
-    app.use(cors());
+    app.use(cors({
+      exposedHeaders: ['mcp-session-id'],
+    }));
 
     // Serve an info page for browser requests
     app.get('/', (req: any, res: any, next: any) => {
