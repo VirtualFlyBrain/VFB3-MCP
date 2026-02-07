@@ -411,6 +411,35 @@ function getHtmlPage(): string {
 }</code></pre>
   </div>
 
+  <h3>Gemini Setup</h3>
+  <p>To use the Virtual Fly Brain (VFB) Model Context Protocol (MCP) server with AI on Google Search, connect through the Gemini CLI or a custom Python/Node.js client.</p>
+  <p>The Gemini web interface does not directly support custom MCP integration. Developer tools are needed to connect the two.</p>
+
+  <h4>Option 1: Using Gemini CLI</h4>
+  <p>The Gemini CLI allows direct registration of remote MCP servers.</p>
+  <ol>
+    <li class="step"><strong>Install the CLI</strong>: Ensure Node.js is installed, then run:</li>
+  </ol>
+  <div class="config-json">
+    <pre><code>npm install -g @google/gemini-cli</code></pre>
+  </div>
+  <ol start="2">
+    <li class="step"><strong>Add the VFB Server</strong>: Use the add command with the VFB URL.</li>
+  </ol>
+  <div class="config-json">
+    <pre><code>gemini mcp add vfb https://vfb3-mcp.virtualflybrain.org</code></pre>
+  </div>
+  <ol start="3">
+    <li class="step"><strong>Verify & Use</strong>: Run the CLI by typing <code>gemini</code>. Check the connection with <code>/mcp</code>. AI on Google Search will then call VFB's neuroanatomy and connectivity tools when questions about Drosophila are asked.</li>
+  </ol>
+
+  <h4>Option 2: Using Python</h4>
+  <p>For application development, use the <code>mcp</code> and <code>google-genai</code> libraries to connect.</p>
+  <ol>
+    <li class="step"><strong>Setup</strong>: <code>pip install google-genai mcp</code></li>
+    <li class="step"><strong>Implementation</strong>: Use an <code>SSEClientTransport</code> to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.</li>
+  </ol>
+
   <h2>🧪 Testing the Connection</h2>
   <p>Once configured, you can test that VFB3-MCP is working by asking your AI assistant to:</p>
   <ul>

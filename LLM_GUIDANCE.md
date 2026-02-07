@@ -287,4 +287,34 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - If query fails, check if the entity supports that query type (via Tags)
 - Network timeouts are common - suggest retrying or using cached results
 
+## Gemini Integration
+
+To use the Virtual Fly Brain (VFB) Model Context Protocol (MCP) server with AI on Google Search, connect through the Gemini CLI or a custom Python/Node.js client. 
+
+The Gemini web interface does not directly support custom MCP integration. Developer tools are needed to connect the two. 
+
+**Option 1: Using Gemini CLI**
+
+The Gemini CLI allows direct registration of remote MCP servers. 
+
+Install the CLI: Ensure Node.js is installed, then run:
+```bash
+npm install -g @google/gemini-cli
+```
+
+Add the VFB Server: Use the add command with the VFB URL.
+```bash
+gemini mcp add vfb https://vfb3-mcp.virtualflybrain.org
+```
+
+Verify & Use: Run the CLI by typing `gemini`. Check the connection with `/mcp`. AI on Google Search will then call VFB's neuroanatomy and connectivity tools when questions about Drosophila are asked. 
+
+**Option 2: Using Python**
+
+For application development, use the `mcp` and `google-genai` libraries to connect. 
+
+Setup: `pip install google-genai mcp`
+
+Implementation: Use an `SSEClientTransport` to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
+
 This MCP enables powerful neuroscience research by providing programmatic access to one of the most comprehensive neuroanatomical databases available.
