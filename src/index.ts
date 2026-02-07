@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.2.4';
+const VERSION = '1.3.0';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -452,6 +452,16 @@ async function runHttpMode() {
 
   // Store active transports by session ID
   const transports: Record<string, StreamableHTTPServerTransport> = {};
+
+  // MCP Registry HTTP authentication endpoint
+  app.get('/.well-known/mcp-registry-auth', (_req: any, res: any) => {
+    const authProof = process.env.MCP_REGISTRY_AUTH;
+    if (authProof) {
+      res.type('text/plain').send(authProof);
+    } else {
+      res.status(404).send('Not configured');
+    }
+  });
 
   // Handle GET requests: browser HTML page or SSE streams
   app.get('/', async (req: any, res: any) => {

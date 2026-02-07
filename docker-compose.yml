@@ -31,3 +31,5 @@ services:
       # GA4 Analytics (optional - set to enable usage tracking)
       - GA_MEASUREMENT_ID=
       - GA_API_SECRET=
+      # MCP Registry HTTP authentication (optional)
+      - MCP_REGISTRY_AUTH=${MCP_REGISTRY_AUTH:-}

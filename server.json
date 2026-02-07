@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "org.virtualflybrain/vfb3-mcp",
+  "title": "VirtualFlyBrain",
+  "description": "MCP server for Drosophila neuroscience data from VirtualFlyBrain",
+  "version": "1.3.0",
+  "websiteUrl": "https://virtualflybrain.org",
+  "repository": {
+    "url": "https://github.com/Robbie1977/VFB3-MCP",
+    "source": "github",
+    "id": "1150713920"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://vfb3-mcp.virtualflybrain.org"
+    }
+  ]
+}

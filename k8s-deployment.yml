@@ -54,6 +54,13 @@ spec:
               name: vfb3-mcp-analytics
               key: ga-api-secret
               optional: true
+        # MCP Registry HTTP authentication (optional)
+        - name: MCP_REGISTRY_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: vfb3-mcp-secrets
+              key: mcp-registry-auth
+              optional: true
         volumeMounts:
         - name: tmp-volume
           mountPath: /tmp
