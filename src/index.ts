@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.3.3';
+const VERSION = '1.3.4';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -170,6 +170,16 @@ async function handleGetTermInfo(args: { id: string }) {
 
   try {
     const response = await axios.get(url);
+    if (response.data === null || response.data === undefined) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `No term info found for ID "${id}". This ID may not exist, may be deprecated, or may not yet be indexed in the term info API. Try using the search_terms tool to verify the ID exists.`,
+          },
+        ],
+      };
+    }
     return {
       content: [
         {
@@ -196,6 +206,16 @@ async function handleRunQuery(args: { id: string; query_type: string }) {
 
   try {
     const response = await axios.get(url);
+    if (response.data === null || response.data === undefined) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `No results for query "${query_type}" on ID "${id}". This ID may not exist, may be deprecated, or this query type may not be supported for this entity. Try using the search_terms tool to verify the ID exists.`,
+          },
+        ],
+      };
+    }
     return {
       content: [
         {
