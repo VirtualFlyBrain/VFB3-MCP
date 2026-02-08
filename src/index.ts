@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.3.4';
+const VERSION = '1.3.5';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -84,7 +84,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
         },
         {
           name: 'run_query',
-          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type',
+          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type. IMPORTANT: Do NOT pass tool names (like "get_term_info" or "search_terms") as query_type — those are separate tools. Valid query_types are returned by get_term_info in the Queries array for each entity. Common query_types include: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (for templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery (for neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere (for classes). Available query_types vary by entity type — always call get_term_info first to see which queries are available for a given ID.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -94,7 +94,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
               },
               query_type: {
                 type: 'string',
-                description: 'Query type (e.g., PaintedDomains)',
+                description: 'A valid query type from the Queries array returned by get_term_info (e.g., PaintedDomains, AllAlignedImages, SubclassesOf). Do NOT use tool names here.',
               },
             },
             required: ['id', 'query_type'],
@@ -202,6 +202,28 @@ async function handleGetTermInfo(args: { id: string }) {
 
 async function handleRunQuery(args: { id: string; query_type: string }) {
   const { id, query_type } = args;
+
+  // If the LLM accidentally passes a tool name as query_type, redirect to the correct handler
+  if (query_type === 'get_term_info') {
+    const result = await handleGetTermInfo({ id });
+    // Prepend a hint so the LLM learns to use the correct tool next time
+    if (result.content && result.content.length > 0 && result.content[0].type === 'text') {
+      result.content[0].text = `Note: "get_term_info" is a separate tool, not a query_type for run_query. Use the get_term_info tool directly next time. Here are the results:\n\n${result.content[0].text}`;
+    }
+    return result;
+  }
+
+  if (query_type === 'search_terms') {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Note: "search_terms" is a separate tool, not a query_type for run_query. Use the search_terms tool directly with a query parameter. Valid query_types for run_query include: PaintedDomains, etc.`,
+        },
+      ],
+    };
+  }
+
   const url = `https://v3-cached.virtualflybrain.org/run_query?id=${id}&query_type=${query_type}`;
 
   try {
