@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -527,7 +527,13 @@ async function runHttpMode() {
         return;
       }
 
-      if (!sessionId && isInitializeRequest(req.body)) {
+      // Check for initialization request (handles both single and batch messages)
+      const body = req.body;
+      const hasInitRequest = Array.isArray(body)
+        ? body.some((msg: unknown) => isInitializeRequest(msg))
+        : isInitializeRequest(body);
+
+      if (hasInitRequest) {
         // New initialization request — create transport and server
         const sessionIdHolder: { id?: string } = {};
         const transport = new StreamableHTTPServerTransport({
@@ -556,7 +562,7 @@ async function runHttpMode() {
         return;
       }
 
-      // Invalid request
+      // Invalid request — no valid session and not an initialize request
       res.status(400).json({
         jsonrpc: '2.0',
         error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
