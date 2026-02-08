@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -502,10 +502,19 @@ async function runHttpMode() {
 
     // SSE stream for existing MCP sessions
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    if (!sessionId || !transports[sessionId]) {
+    if (!sessionId) {
       res.status(400).json({
         jsonrpc: '2.0',
-        error: { code: -32000, message: 'Bad Request: Invalid or missing session ID' },
+        error: { code: -32000, message: 'Bad Request: Missing session ID' },
+        id: null,
+      });
+      return;
+    }
+    if (!transports[sessionId]) {
+      // Session not found — return 404 per MCP spec so client re-initializes
+      res.status(404).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Session not found' },
         id: null,
       });
       return;
@@ -524,6 +533,16 @@ async function runHttpMode() {
         // Existing session — reuse transport
         const transport = transports[sessionId];
         await transport.handleRequest(req, res, req.body);
+        return;
+      }
+
+      // Session ID provided but not found — return 404 per MCP spec so client re-initializes
+      if (sessionId && !transports[sessionId]) {
+        res.status(404).json({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found' },
+          id: null,
+        });
         return;
       }
 
@@ -583,10 +602,19 @@ async function runHttpMode() {
   // Handle DELETE requests: session termination
   app.delete('/', async (req: any, res: any) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    if (!sessionId || !transports[sessionId]) {
+    if (!sessionId) {
       res.status(400).json({
         jsonrpc: '2.0',
-        error: { code: -32000, message: 'Bad Request: Invalid or missing session ID' },
+        error: { code: -32000, message: 'Bad Request: Missing session ID' },
+        id: null,
+      });
+      return;
+    }
+    if (!transports[sessionId]) {
+      // Session not found — return 404 per MCP spec so client re-initializes
+      res.status(404).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Session not found' },
         id: null,
       });
       return;
