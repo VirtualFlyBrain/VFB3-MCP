@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.3.5';
+const VERSION = '1.4.0';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -125,6 +125,27 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
                 items: { type: 'string' },
                 description: 'Boost ranking of results matching these facets_annotation types without excluding others',
               },
+              start: {
+                type: 'number',
+                description: 'Pagination start index (default 0) - use to get results beyond the first page',
+                default: 0,
+              },
+              rows: {
+                type: 'number',
+                description: 'Number of results to return (default 150, max 1000) - use smaller numbers for focused searches',
+                default: 150,
+                maximum: 1000,
+              },
+              minimize_results: {
+                type: 'boolean',
+                description: 'When true, limit results to top 10 for initial searches and add truncation metadata. For exact matches, return only the matching result.',
+                default: false,
+              },
+              auto_fetch_term_info: {
+                type: 'boolean',
+                description: 'When true and an exact label match is found, automatically fetch and include term info in the response.',
+                default: false,
+              },
             },
             required: ['query'],
           },
@@ -146,7 +167,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
         case 'run_query':
           return await handleRunQuery(args as { id: string; query_type: string });
         case 'search_terms':
-          return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[] });
+          return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
         default:
           console.error('MCP Debug: Unknown tool requested:', name);
           throw new McpError(
@@ -258,8 +279,8 @@ async function handleRunQuery(args: { id: string; query_type: string }) {
   }
 }
 
-async function handleSearchTerms(args: { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[] }) {
-  const { query, filter_types, exclude_types, boost_types } = args;
+async function handleSearchTerms(args: { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean }) {
+  const { query, filter_types, exclude_types, boost_types, start = 0, rows = 150, minimize_results = false, auto_fetch_term_info = false } = args;
   const baseUrl = 'https://solr.virtualflybrain.org/solr/ontology/select';
 
   const fq: string[] = [
@@ -291,21 +312,96 @@ async function handleSearchTerms(args: { query: string; filter_types?: string[];
     qf: 'label^110 synonym^100 label_autosuggest synonym_autosuggest shortform_autosuggest',
     indent: 'true',
     fl: 'short_form,label,synonym,id,facets_annotation,unique_facets',
-    start: '0',
+    start: start.toString(),
     pf: 'true',
     fq,
-    rows: '150',
+    rows: Math.min(rows, 1000).toString(), // Cap at 1000 max
     wt: 'json',
     bq,
   };
 
   try {
     const response = await axios.get(baseUrl, { params });
+    let resultData = response.data;
+
+    // Handle minimization and auto-fetch logic
+    if (minimize_results || auto_fetch_term_info) {
+      if (resultData?.response?.docs) {
+        const originalCount = resultData.response.numFound;
+        const queryLower = query.toLowerCase();
+        const isPaginatedRequest = start > 0 || rows !== 150;
+
+        // Check for exact label match first (only for non-paginated requests)
+        let exactMatch = null;
+        if (!isPaginatedRequest) {
+          exactMatch = resultData.response.docs.find((doc: any) =>
+            doc.label?.toLowerCase() === queryLower
+          );
+        }
+
+        let minimizedDocs = resultData.response.docs;
+        let truncationInfo: any = {};
+
+        if (exactMatch) {
+          // If exact match found, return only that one
+          minimizedDocs = [exactMatch];
+          truncationInfo = { exactMatch: true, totalAvailable: originalCount };
+        } else if (minimize_results && !isPaginatedRequest) {
+          // For initial searches without pagination, limit to top 10
+          minimizedDocs = resultData.response.docs.slice(0, 10);
+          truncationInfo = {
+            truncated: originalCount > 10,
+            shown: minimizedDocs.length,
+            totalAvailable: originalCount,
+            canRequestMore: originalCount > 10
+          };
+        } else if (isPaginatedRequest) {
+          // For paginated requests, return all requested results
+          truncationInfo = {
+            paginated: true,
+            requested: rows,
+            returned: minimizedDocs.length,
+            totalAvailable: originalCount
+          };
+        }
+
+        // Keep only essential fields if minimizing
+        if (minimize_results) {
+          minimizedDocs = minimizedDocs.map((doc: any) => ({
+            short_form: doc.short_form,
+            label: doc.label,
+            synonym: Array.isArray(doc.synonym) ? doc.synonym.slice(0, 1) : doc.synonym // Keep only first synonym
+          }));
+        }
+
+        resultData.response.docs = minimizedDocs;
+        resultData.response.numFound = minimizedDocs.length; // Update count
+
+        // Add truncation metadata
+        if (Object.keys(truncationInfo).length > 0) {
+          resultData.response._truncation = truncationInfo;
+        }
+
+        // Auto-fetch term info for exact match
+        if (auto_fetch_term_info && exactMatch) {
+          try {
+            const termInfoResult = await handleGetTermInfo({ id: exactMatch.short_form });
+            if (termInfoResult.content && termInfoResult.content[0]?.text) {
+              resultData._term_info = JSON.parse(termInfoResult.content[0].text);
+            }
+          } catch (termInfoError) {
+            console.error('Error auto-fetching term info:', termInfoError);
+            // Don't fail the search if term info fetch fails
+          }
+        }
+      }
+    }
+
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify(response.data, null, 2),
+          text: JSON.stringify(resultData, null, 2),
         },
       ],
     };
