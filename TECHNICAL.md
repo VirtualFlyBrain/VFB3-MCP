@@ -186,9 +186,9 @@ The server integrates with VirtualFlyBrain APIs:
 - **API Call**: POST to query endpoint
 
 #### search_terms
-- **Input**: Search query with optional filters
-- **Output**: Search results with metadata
-- **API Call**: GET to Solr search endpoint
+- **Input**: Search query with optional filters, pagination, and result control parameters
+- **Output**: Search results with optional truncation metadata and auto-fetched term info
+- **API Call**: GET to Solr search endpoint with enhanced parameter handling
 
 ### Error Handling
 

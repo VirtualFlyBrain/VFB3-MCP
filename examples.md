@@ -44,6 +44,50 @@ This file contains examples of how to use the VFB3-MCP server tools.
 }
 ```
 
+### 4. Search Terms with Filtering
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search_terms",
+    "arguments": {
+      "query": "medulla",
+      "filter_types": ["neuron", "adult"],
+      "exclude_types": ["deprecated"]
+    }
+  }
+}
+```
+
+### 5. Search Terms with Minimization
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search_terms",
+    "arguments": {
+      "query": "medulla",
+      "minimize_results": true,
+      "rows": 20
+    }
+  }
+}
+```
+
+### 6. Search Terms with Auto Term Info
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search_terms",
+    "arguments": {
+      "query": "antennal lobe",
+      "auto_fetch_term_info": true
+    }
+  }
+}
+```
+
 ## Integration with MCP Clients
 
 ### Claude Desktop

@@ -247,10 +247,17 @@ Execute predefined queries on VFB data.
 - `query_type` (string): Type of query (e.g., "PaintedDomains")
 
 ### search_terms
-Search for VFB terms using the Solr search server.
+Search for VFB terms using the Solr search server with optional filtering and result control.
 
 **Parameters:**
 - `query` (string): Search query (e.g., "medulla")
+- `filter_types` (array, optional): Filter results to only include items matching ALL of these facets_annotation types (AND logic)
+- `exclude_types` (array, optional): Exclude results matching ANY of these facets_annotation types (OR logic)
+- `boost_types` (array, optional): Boost ranking of results matching these facets_annotation types without excluding others
+- `start` (number, optional): Pagination start index (default 0) - use to get results beyond the first page
+- `rows` (number, optional): Number of results to return (default 150, max 1000) - use smaller numbers for focused searches
+- `minimize_results` (boolean, optional): When true, limit results to top 10 for initial searches and add truncation metadata (default false)
+- `auto_fetch_term_info` (boolean, optional): When true and an exact match is found, automatically fetch and include term info in the response (default false)
 
 ## 🧠 About VirtualFlyBrain
 
