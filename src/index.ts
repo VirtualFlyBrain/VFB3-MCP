@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
