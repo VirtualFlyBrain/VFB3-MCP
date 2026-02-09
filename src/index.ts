@@ -13,7 +13,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.4.1';
+const VERSION = '1.4.2';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -84,7 +84,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
         },
         {
           name: 'run_query',
-          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type. IMPORTANT: Do NOT pass tool names (like "get_term_info" or "search_terms") as query_type — those are separate tools. Valid query_types are returned by get_term_info in the Queries array for each entity. Common query_types include: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (for templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery (for neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere (for classes). Available query_types vary by entity type — always call get_term_info first to see which queries are available for a given ID.',
+          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type. IMPORTANT: Do NOT pass tool names (like "get_term_info" or "search_terms") as query_type — those are separate tools. Valid query_types are returned by get_term_info in the Queries array for each entity. Common query_types include: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (for templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery (for neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere (for classes). Available query_types vary by entity type — ALWAYS call get_term_info FIRST to see which queries are available for a given ID, as attempting invalid query types will result in an error message directing you to use get_term_info.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -94,7 +94,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
               },
               query_type: {
                 type: 'string',
-                description: 'A valid query type from the Queries array returned by get_term_info (e.g., PaintedDomains, AllAlignedImages, SubclassesOf). Do NOT use tool names here.',
+                description: 'A valid query type from the Queries array returned by get_term_info (e.g., PaintedDomains, AllAlignedImages, SubclassesOf). Do NOT use tool names here. Always check get_term_info first for available query types.',
               },
             },
             required: ['id', 'query_type'],
@@ -259,6 +259,19 @@ async function handleRunQuery(args: { id: string; query_type: string }) {
         ],
       };
     }
+    
+    // Check if the response contains an error
+    if (response.data.error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `${response.data.error}\n\nTo find valid query types for this term, first use the get_term_info tool with ID "${id}" to see the available queries in the "Queries" array. This will show you the supported query types and expected result counts for this specific entity.`,
+          },
+        ],
+      };
+    }
+    
     return {
       content: [
         {
