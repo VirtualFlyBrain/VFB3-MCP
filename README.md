@@ -22,7 +22,9 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 {
   "mcpServers": {
     "virtual-fly-brain": {
-      "url": "https://vfb3-mcp.virtualflybrain.org"
+      "type": "http",
+      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "tools": ["*"]
     }
   }
 }
@@ -39,7 +41,9 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 {
   "mcpServers": {
     "virtual-fly-brain": {
-      "url": "https://vfb3-mcp.virtualflybrain.org"
+      "type": "http",
+      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "tools": ["*"]
     }
   }
 }
@@ -55,6 +59,18 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 4. **Find the MCP Servers setting**
 5. **Add the server URL**: `https://vfb3-mcp.virtualflybrain.org`
 6. **Give it a name** like "Virtual Fly Brain"
+
+**Alternative JSON configuration** (in `mcp.json`):
+```json
+{
+  "servers": {
+    "virtual-fly-brain": {
+      "type": "http",
+      "url": "https://vfb3-mcp.virtualflybrain.org"
+    }
+  }
+}
+```
 
 #### Visual Studio Code (with MCP Extension)
 
@@ -75,8 +91,9 @@ For any MCP-compatible client that supports HTTP servers:
 {
   "mcpServers": {
     "virtual-fly-brain": {
+      "type": "http",
       "url": "https://vfb3-mcp.virtualflybrain.org",
-      "type": "http"
+      "tools": ["*"]
     }
   }
 }
@@ -84,29 +101,13 @@ For any MCP-compatible client that supports HTTP servers:
 
 #### Gemini Setup
 
-To use the Virtual Fly Brain (VFB) Model Context Protocol (MCP) server with AI on Google Search, connect through the Gemini CLI or a custom Python/Node.js client. 
+To use the Virtual Fly Brain (VFB) Model Context Protocol (MCP) server with Google Gemini, you can connect through custom Python/Node.js clients that support MCP.
 
-The Gemini web interface does not directly support custom MCP integration. Developer tools are needed to connect the two. 
+**Note**: Direct Gemini web interface integration with MCP is not currently supported. Developer tools are needed to connect the two.
 
-**Option 1: Using Gemini CLI**
+**Option 1: Using Python**
 
-The Gemini CLI allows direct registration of remote MCP servers. 
-
-Install the CLI: Ensure Node.js is installed, then run:
-```bash
-npm install -g @google/gemini-cli
-```
-
-Add the VFB Server: Use the add command with the VFB URL.
-```bash
-gemini mcp add vfb https://vfb3-mcp.virtualflybrain.org
-```
-
-Verify & Use: Run the CLI by typing `gemini`. Check the connection with `/mcp`. AI on Google Search will then call VFB's neuroanatomy and connectivity tools when questions about Drosophila are asked. 
-
-**Option 2: Using Python**
-
-For application development, use the `mcp` and `google-genai` libraries to connect. 
+For application development, use the `mcp` and `google-genai` libraries to connect.
 
 Setup: `pip install google-genai mcp`
 
@@ -114,13 +115,34 @@ Implementation: Use an `SSEClientTransport` to connect to the VFB URL, list its 
 
 #### Testing the Connection
 
-Once configured, you can test that VFB3-MCP is working by asking your AI assistant to:
+Once configured, you can test that VFB3-MCP is working by asking your AI assistant questions like:
 
-- "Get information about the term VFB_jrcv0i43"
-- "Search for terms related to medulla"
-- "Run a PaintedDomains query for VFB_00101567"
+**Basic Queries:**
+- "Get information about the neuron VFB_jrcv0i43"
+- "Search for terms related to medulla in the fly brain"
+- "What neurons are in the antennal lobe?"
 
-If you see responses with VirtualFlyBrain data, the setup is successful!
+**Advanced Queries:**
+- "Find all neurons that connect to the mushroom body"
+- "Show me expression patterns for gene repo"
+- "What brain regions are involved in olfactory processing?"
+- "Run a connectivity analysis for neuron VFB_00101567"
+
+**Search Examples:**
+- "Search for adult neurons in the visual system"
+- "Find genes expressed in the central complex"
+- "Show me all templates available in VFB"
+
+If you see responses with VirtualFlyBrain data, including neuron names, brain regions, gene expressions, or connectivity information, the setup is successful!
+
+For more detailed usage examples and API calls, see **[examples.md](examples.md)**.
+
+### Example Workflow
+
+1. **Search for a term**: "Search for neurons in the optic lobe"
+2. **Get detailed info**: "Get information about VFB_00101567"
+3. **Run specific queries**: "Show connectivity for VFB_00101567"
+4. **Explore relationships**: "What neurons synapse in the mushroom body?"
 
 ## 🛠️ Local Installation
 

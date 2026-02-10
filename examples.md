@@ -96,7 +96,9 @@ Add to your MCP server configuration:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org"
+      "type": "http",
+      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "tools": ["*"]
     }
   }
 }
@@ -108,7 +110,9 @@ Add to your `claude.json`:
 {
   "mcpServers": {
     "vfb3-mcp": {
-      "url": "https://vfb3-mcp.virtualflybrain.org"
+      "type": "http",
+      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "tools": ["*"]
     }
   }
 }
