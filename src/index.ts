@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -798,6 +798,26 @@ async function runHttpMode() {
       const requestJson = JSON.stringify(requestBody);
       const requestLine = requestJson.replace(/\s+/g, ' ').trim();
       console.error(`MCP Debug: HTTP request: POST / client_ip=${clientIp} - body: ${requestLine}`);
+
+      // Diagnostic: dump all IP-related info on tools/list to help debug proxy headers
+      if (requestBody.method === 'tools/list') {
+        console.error('MCP Debug: === IP diagnostic dump for tools/list ===');
+        console.error(`  req.ip: ${req.ip}`);
+        console.error(`  req.ips: ${JSON.stringify(req.ips)}`);
+        console.error(`  req.socket.remoteAddress: ${req.socket?.remoteAddress}`);
+        console.error(`  req.connection.remoteAddress: ${req.connection?.remoteAddress}`);
+        console.error(`  x-forwarded-for: ${req.headers['x-forwarded-for'] || '(not set)'}`);
+        console.error(`  x-real-ip: ${req.headers['x-real-ip'] || '(not set)'}`);
+        console.error(`  x-forwarded-host: ${req.headers['x-forwarded-host'] || '(not set)'}`);
+        console.error(`  x-forwarded-proto: ${req.headers['x-forwarded-proto'] || '(not set)'}`);
+        console.error(`  forwarded: ${req.headers['forwarded'] || '(not set)'}`);
+        console.error(`  cf-connecting-ip: ${req.headers['cf-connecting-ip'] || '(not set)'}`);
+        console.error(`  true-client-ip: ${req.headers['true-client-ip'] || '(not set)'}`);
+        console.error(`  x-client-ip: ${req.headers['x-client-ip'] || '(not set)'}`);
+        console.error(`  x-original-forwarded-for: ${req.headers['x-original-forwarded-for'] || '(not set)'}`);
+        console.error(`  All headers: ${JSON.stringify(req.headers)}`);
+        console.error('MCP Debug: === end IP diagnostic dump ===');
+      }
 
       // Create a fresh server and transport for every request.
       // sessionIdGenerator: undefined = stateless mode — no session ID is
