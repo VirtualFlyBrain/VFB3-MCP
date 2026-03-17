@@ -672,6 +672,12 @@ async function runHttpMode() {
   // Handle POST requests: stateless — fresh server + transport per request
   app.post('/', async (req: any, res: any) => {
     try {
+      // Log the incoming MCP request on a single line for clean log ingestion
+      const requestBody = req.body && typeof req.body === 'object' ? req.body : {};
+      const requestJson = JSON.stringify(requestBody);
+      const requestLine = requestJson.replace(/\s+/g, ' ').trim();
+      console.error(`MCP Debug: HTTP request: POST / - body: ${requestLine}`);
+
       // Create a fresh server and transport for every request.
       // sessionIdGenerator: undefined = stateless mode — no session ID is
       // generated, returned, or validated. Any replica can handle any request.
