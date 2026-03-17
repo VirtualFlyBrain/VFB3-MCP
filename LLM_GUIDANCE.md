@@ -355,6 +355,6 @@ For application development, use the `mcp` and `google-genai` libraries to conne
 
 Setup: `pip install google-genai mcp`
 
-Implementation: Use an `SSEClientTransport` to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
+Implementation: Use a streamable HTTP transport in JSON response mode (e.g. `enableJsonResponse: true`) to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
 
 This MCP enables powerful neuroscience research by providing programmatic access to one of the most comprehensive neuroanatomical databases available.

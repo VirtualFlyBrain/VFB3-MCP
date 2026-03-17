@@ -14,17 +14,18 @@ The VFB3-MCP server supports two operational modes:
 - Compatible with Claude Desktop local MCP configuration
 
 #### HTTP Mode (Production)
-- Express.js server with Server-Sent Events (SSE) for bidirectional communication
-- RESTful endpoints for MCP protocol
+- Express.js server with stateless JSON-over-HTTP request/response (no SSE)
+- RESTful endpoints for MCP protocol (POST / for MCP requests, GET/DELETE return 405 unless requesting HTML)
 - OAuth 2.0 metadata endpoints (returns 404 - no authentication required)
 - CORS enabled for web client access
 
 ### MCP Protocol Implementation
 
 - Built using the official `@modelcontextprotocol/sdk`
-- Express transport for HTTP mode with SSE
+- Express transport for HTTP mode using stateless JSON-over-HTTP (no SSE)
 - Stdio transport for local development
-- Session management with UUID-based session IDs
+- Stateless HTTP mode (no session tracking / no session IDs)
+- GA4 analytics use a stable server-side client ID in HTTP mode (no per-session IDs)
 
 ## Infrastructure
 
@@ -35,9 +36,9 @@ The VFB3-MCP server supports two operational modes:
 The production deployment runs on VFB's Rancher/Cattle Kubernetes infrastructure with:
 
 - **Protocol**: HTTPS with automatic SSL certificate management
-- **Transport**: Server-Sent Events (SSE) for real-time bidirectional communication
+- **Transport**: Stateless JSON-over-HTTP request/response (no SSE)
 - **Authentication**: Open server (no authentication required)
-- **Load Balancing**: Kubernetes service with automatic scaling
+- **Load Balancing**: Kubernetes service with automatic scaling (stateless; no sticky sessions required)
 - **Resource Limits**: 512Mi memory, 500m CPU
 - **Security**: Non-root user (UID 1000), read-only filesystem
 - **MCP Endpoint**: `/` (root path)
@@ -227,7 +228,7 @@ For application development, use the `mcp` and `google-genai` libraries to conne
 
 Setup: `pip install google-genai mcp`
 
-Implementation: Use an `SSEClientTransport` to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
+Implementation: Use a streamable HTTP transport in JSON response mode (e.g. `enableJsonResponse: true`) to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
 
 ## Security
 
@@ -255,7 +256,7 @@ While the server includes OAuth metadata endpoints for MCP SDK compatibility, au
 - **Console Output**: Structured logging to stdout/stderr
 - **Debug Mode**: Verbose logging with `MCP_DEBUG=true`
 - **Error Handling**: Comprehensive error logging with context
-- **Request Tracking**: Session and request ID logging
+- **Request Tracking**: Request ID logging (no session IDs in HTTP mode)
 
 ### Infrastructure Monitoring
 
@@ -271,7 +272,7 @@ While the server includes OAuth metadata endpoints for MCP SDK compatibility, au
 - **API Caching**: VFB provides cached endpoints for performance
 - **Connection Pooling**: Axios configuration for efficient HTTP requests
 - **Memory Management**: Node.js memory limits and garbage collection
-- **Concurrent Requests**: Support for multiple simultaneous MCP sessions
+- **Concurrent Requests**: Support for multiple simultaneous MCP requests (stateless)
 
 ### Scalability
 

@@ -6,14 +6,13 @@ import {
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
-  isInitializeRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
 import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.4.4';
+const VERSION = '1.5.0';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -636,15 +635,13 @@ function getHtmlPage(): string {
 
 async function runHttpMode() {
   const port = process.env.PORT || '3000';
-  console.error(`MCP Debug: Starting VFB3-MCP server v${VERSION} in HTTP mode on port ${port}`);
+  console.error(`MCP Debug: Starting VFB3-MCP server v${VERSION} in STATELESS HTTP mode on port ${port}`);
   console.error(`MCP Debug: GA4 analytics ${GA_ENABLED ? 'enabled' : 'disabled (set GA_MEASUREMENT_ID and GA_API_SECRET to enable)'}`);
+  console.error('MCP Debug: Stateless mode — no session tracking, safe for multi-replica deployment');
 
   const app = express();
   app.use(cors());
   app.use(express.json());
-
-  // Store active transports by session ID
-  const transports: Record<string, StreamableHTTPServerTransport> = {};
 
   // MCP Registry HTTP authentication endpoint
   app.get('/.well-known/mcp-registry-auth', (_req: any, res: any) => {
@@ -656,7 +653,7 @@ async function runHttpMode() {
     }
   });
 
-  // Handle GET requests: browser HTML page or SSE streams
+  // Handle GET requests: browser HTML page (SSE not supported in stateless mode)
   app.get('/', async (req: any, res: any) => {
     // Serve HTML page for browser requests
     if (req.headers.accept && req.headers.accept.includes('text/html')) {
@@ -664,93 +661,38 @@ async function runHttpMode() {
       return;
     }
 
-    // SSE stream for existing MCP sessions
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    if (!sessionId) {
-      res.status(400).json({
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'Bad Request: Missing session ID' },
-        id: null,
-      });
-      return;
-    }
-    if (!transports[sessionId]) {
-      // Session not found — return 404 per MCP spec so client re-initializes
-      res.status(404).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Session not found' },
-        id: null,
-      });
-      return;
-    }
-
-    const transport = transports[sessionId];
-    await transport.handleRequest(req, res);
+    // SSE streams are not supported in stateless mode
+    res.writeHead(405).end(JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Method not allowed. SSE streams are not supported in stateless mode.' },
+      id: null,
+    }));
   });
 
-  // Handle POST requests: MCP JSON-RPC messages
+  // Handle POST requests: stateless — fresh server + transport per request
   app.post('/', async (req: any, res: any) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
-
     try {
-      if (sessionId && transports[sessionId]) {
-        // Existing session — reuse transport
-        const transport = transports[sessionId];
-        await transport.handleRequest(req, res, req.body);
-        return;
-      }
-
-      // Session ID provided but not found — return 404 per MCP spec so client re-initializes
-      if (sessionId && !transports[sessionId]) {
-        res.status(404).json({
-          jsonrpc: '2.0',
-          error: { code: -32001, message: 'Session not found' },
-          id: null,
-        });
-        return;
-      }
-
-      // Check for initialization request (handles both single and batch messages)
-      const body = req.body;
-      const hasInitRequest = Array.isArray(body)
-        ? body.some((msg: unknown) => isInitializeRequest(msg))
-        : isInitializeRequest(body);
-
-      if (hasInitRequest) {
-        // New initialization request — create transport and server
-        const sessionIdHolder: { id?: string } = {};
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (sid: string) => {
-            console.error(`MCP Debug: Session initialized: ${sid}`);
-            transports[sid] = transport;
-            sessionIdHolder.id = sid;
-          },
-        });
-
-        transport.onclose = () => {
-          const sid = transport.sessionId;
-          if (sid && transports[sid]) {
-            console.error(`MCP Debug: Session closed: ${sid}`);
-            delete transports[sid];
-          }
-        };
-
-        // Connect a new MCP server to this transport
-        const server = createServer(sessionIdHolder);
-        await server.connect(transport);
-
-        // Handle the initialization request
-        await transport.handleRequest(req, res, req.body);
-        return;
-      }
-
-      // Invalid request — no valid session and not an initialize request
-      res.status(400).json({
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
-        id: null,
+      // Create a fresh server and transport for every request.
+      // sessionIdGenerator: undefined = stateless mode — no session ID is
+      // generated, returned, or validated. Any replica can handle any request.
+      const server = createServer();
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
       });
+
+      transport.onerror = (error) => {
+        console.error('MCP transport error:', error);
+      };
+
+      // Clean up when the HTTP connection closes
+      res.on('close', () => {
+        transport.close();
+        server.close();
+      });
+
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
     } catch (error) {
       console.error('MCP Debug: Error handling POST request:', error);
       if (!res.headersSent) {
@@ -763,36 +705,13 @@ async function runHttpMode() {
     }
   });
 
-  // Handle DELETE requests: session termination
-  app.delete('/', async (req: any, res: any) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    if (!sessionId) {
-      res.status(400).json({
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'Bad Request: Missing session ID' },
-        id: null,
-      });
-      return;
-    }
-    if (!transports[sessionId]) {
-      // Session not found — return 404 per MCP spec so client re-initializes
-      res.status(404).json({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: 'Session not found' },
-        id: null,
-      });
-      return;
-    }
-
-    try {
-      const transport = transports[sessionId];
-      await transport.handleRequest(req, res);
-    } catch (error) {
-      console.error('MCP Debug: Error handling DELETE request:', error);
-      if (!res.headersSent) {
-        res.status(500).send('Error processing session termination');
-      }
-    }
+  // DELETE not supported in stateless mode (no sessions to terminate)
+  app.delete('/', async (_req: any, res: any) => {
+    res.writeHead(405).end(JSON.stringify({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Method not allowed. Session termination is not supported in stateless mode.' },
+      id: null,
+    }));
   });
 
   app.listen(parseInt(port), () => {

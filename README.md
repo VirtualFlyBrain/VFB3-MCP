@@ -1,6 +1,6 @@
 # VFB3-MCP Server
 
-A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB) APIs. This server provides tools to query VFB data, run queries, and search for terms.
+A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB) APIs. This server provides tools to query VFB data, run queries, and search for terms. In HTTP mode it runs statelessly (no session tracking), so any replica can handle any request and standard load balancing works.
 
 ## 🚀 Quick Start
 
@@ -111,7 +111,7 @@ For application development, use the `mcp` and `google-genai` libraries to conne
 
 Setup: `pip install google-genai mcp`
 
-Implementation: Use an `SSEClientTransport` to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
+Implementation: Use a streamable HTTP transport in JSON response mode (e.g. `enableJsonResponse: true`) to connect to the VFB URL, list its tools, and pass their schemas to the Gemini model as Function Declarations.
 
 #### Testing the Connection
 
