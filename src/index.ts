@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -23,7 +23,8 @@ const STDIO_CLIENT_ID = randomUUID(); // fallback client_id for stdio mode
 function trackToolCall(
   toolName: string,
   toolArgs: Record<string, unknown>,
-  sessionId?: string
+  sessionId?: string,
+  clientIp?: string
 ): void {
   if (!GA_ENABLED) return;
 
@@ -47,6 +48,7 @@ function trackToolCall(
           tool_name: toolName,
           server_version: VERSION,
           mcp_mode: process.env.MCP_MODE || 'stdio',
+          ...(clientIp ? { client_ip: clientIp } : {}),
           ...argSummary,
         },
       },
@@ -62,20 +64,71 @@ function trackToolCall(
     .catch(() => {});
 }
 
-function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
+/**
+ * Expand batch tool calls into individual tracking events so every
+ * ID / query pair gets its own GA4 row with batch_size + batch_index.
+ */
+function trackBatchToolCalls(
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  sessionId?: string,
+  clientIp?: string
+): void {
+  if (toolName === 'get_term_info') {
+    const id = toolArgs.id;
+    if (Array.isArray(id)) {
+      for (let i = 0; i < id.length; i++) {
+        trackToolCall(toolName, { id: id[i], batch_size: id.length, batch_index: i }, sessionId, clientIp);
+      }
+      return;
+    }
+  }
+
+  if (toolName === 'run_query') {
+    const queries = toolArgs.queries as Array<{ id: string; query_type: string }> | undefined;
+    const id = toolArgs.id;
+    const queryType = toolArgs.query_type as string | undefined;
+
+    if (queries && Array.isArray(queries) && queries.length > 0) {
+      for (let i = 0; i < queries.length; i++) {
+        trackToolCall(toolName, { id: queries[i].id, query_type: queries[i].query_type, batch_size: queries.length, batch_index: i }, sessionId, clientIp);
+      }
+      return;
+    }
+    if (Array.isArray(id) && queryType) {
+      for (let i = 0; i < id.length; i++) {
+        trackToolCall(toolName, { id: id[i], query_type: queryType, batch_size: id.length, batch_index: i }, sessionId, clientIp);
+      }
+      return;
+    }
+  }
+
+  // Single call — pass through as-is
+  trackToolCall(toolName, toolArgs, sessionId, clientIp);
+}
+
+interface RequestContext {
+  id?: string;
+  clientIp?: string;
+}
+
+function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     console.error('MCP Debug: Received ListTools request');
     return {
       tools: [
         {
           name: 'get_term_info',
-          description: 'Get term information from VirtualFlyBrain using a VFB ID. The Images field is keyed by template brain ID — use these to construct VFB browser URLs: https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<VFB_ID>&i=<TEMPLATE_ID>,<IMAGE_ID1>,<IMAGE_ID2> where id= is the focus term and i= is a comma-separated list of image IDs for the 3D viewer (template ID must be first in the i= list to set the coordinate space).',
+          description: 'Get term information from VirtualFlyBrain using one or more VFB IDs. Supports batch requests — pass an array of IDs to fetch multiple terms in parallel. When multiple IDs are provided, results are returned as a JSON object keyed by ID. The Images field is keyed by template brain ID — use these to construct VFB browser URLs: https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<VFB_ID>&i=<TEMPLATE_ID>,<IMAGE_ID1>,<IMAGE_ID2> where id= is the focus term and i= is a comma-separated list of image IDs for the 3D viewer (template ID must be first in the i= list to set the coordinate space).',
           inputSchema: {
             type: 'object',
             properties: {
               id: {
-                type: 'string',
-                description: 'VFB ID (e.g., VFB_jrcv0i43)',
+                oneOf: [
+                  { type: 'string', description: 'A single VFB ID (e.g., VFB_jrcv0i43)' },
+                  { type: 'array', items: { type: 'string' }, description: 'An array of VFB IDs to fetch in batch (e.g., ["VFB_jrcv0i43", "VFB_00101567"])' },
+                ],
+                description: 'One or more VFB IDs to look up',
               },
             },
             required: ['id'],
@@ -83,20 +136,34 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
         },
         {
           name: 'run_query',
-          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type. IMPORTANT: Do NOT pass tool names (like "get_term_info" or "search_terms") as query_type — those are separate tools. Valid query_types are returned by get_term_info in the Queries array for each entity. Common query_types include: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (for templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery (for neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere (for classes). Available query_types vary by entity type — ALWAYS call get_term_info FIRST to see which queries are available for a given ID, as attempting invalid query types will result in an error message directing you to use get_term_info.',
+          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type. Supports batch requests — pass an array of IDs to run the same query_type on all of them, or use the queries array for mixed ID/query_type combinations. When multiple queries are provided, results are returned as a JSON object keyed by "ID::query_type". IMPORTANT: Do NOT pass tool names (like "get_term_info" or "search_terms") as query_type — those are separate tools. Valid query_types are returned by get_term_info in the Queries array for each entity. Common query_types include: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (for templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery (for neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere (for classes). Available query_types vary by entity type — ALWAYS call get_term_info FIRST to see which queries are available for a given ID, as attempting invalid query types will result in an error message directing you to use get_term_info.',
           inputSchema: {
             type: 'object',
             properties: {
               id: {
-                type: 'string',
-                description: 'VFB ID (e.g., VFB_00101567)',
+                oneOf: [
+                  { type: 'string', description: 'A single VFB ID (e.g., VFB_00101567)' },
+                  { type: 'array', items: { type: 'string' }, description: 'An array of VFB IDs — all will use the same query_type' },
+                ],
+                description: 'One or more VFB IDs to query',
               },
               query_type: {
                 type: 'string',
-                description: 'A valid query type from the Queries array returned by get_term_info (e.g., PaintedDomains, AllAlignedImages, SubclassesOf). Do NOT use tool names here. Always check get_term_info first for available query types.',
+                description: 'A valid query type from the Queries array returned by get_term_info. Used for single id or array of ids.',
+              },
+              queries: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', description: 'VFB ID' },
+                    query_type: { type: 'string', description: 'Query type for this ID' },
+                  },
+                  required: ['id', 'query_type'],
+                },
+                description: 'Array of {id, query_type} pairs for mixed batch queries. When provided, id and query_type params are ignored.',
               },
             },
-            required: ['id', 'query_type'],
           },
         },
         {
@@ -155,16 +222,22 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    console.error('MCP Debug: Received CallTool request for tool:', name, 'with args:', JSON.stringify(args));
+    const batchSize = name === 'get_term_info' && Array.isArray(args?.id) ? args.id.length
+      : name === 'run_query' && Array.isArray(args?.queries) ? args.queries.length
+      : name === 'run_query' && Array.isArray(args?.id) ? args.id.length
+      : 1;
+    console.error(`MCP Debug: Received CallTool request for tool: ${name} (batch_size=${batchSize}) client_ip=${sessionIdHolder?.clientIp || 'unknown'} with args:`, JSON.stringify(args));
 
-    trackToolCall(name, args || {}, sessionIdHolder?.id);
+    const sid = sessionIdHolder?.id;
+    const cip = sessionIdHolder?.clientIp;
+    trackBatchToolCalls(name, args || {}, sid, cip);
 
     try {
       switch (name) {
         case 'get_term_info':
-          return await handleGetTermInfo(args as { id: string });
+          return await handleGetTermInfo(args as { id: string | string[] });
         case 'run_query':
-          return await handleRunQuery(args as { id: string; query_type: string });
+          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> });
         case 'search_terms':
           return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
         default:
@@ -184,111 +257,149 @@ function setupToolHandlers(server: Server, sessionIdHolder?: { id?: string }) {
   });
 }
 
-async function handleGetTermInfo(args: { id: string }) {
-  const { id } = args;
+async function fetchSingleTermInfo(id: string): Promise<{ data?: any; error?: string }> {
   const url = `https://v3-cached.virtualflybrain.org/get_term_info?id=${id}`;
-
+  console.error(`MCP Debug: Fetching term info for id=${id}`);
   try {
     const response = await axios.get(url);
     if (response.data === null || response.data === undefined) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `No term info found for ID "${id}". This ID may not exist, may be deprecated, or may not yet be indexed in the term info API. Try using the search_terms tool to verify the ID exists.`,
-          },
-        ],
-      };
+      console.error(`MCP Debug: No term info found for id=${id}`);
+      return { error: `No term info found for ID "${id}". This ID may not exist, may be deprecated, or may not yet be indexed in the term info API. Try using the search_terms tool to verify the ID exists.` };
     }
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
+    console.error(`MCP Debug: Successfully fetched term info for id=${id}`);
+    return { data: response.data };
   } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error fetching term info: ${error}`,
-        },
-      ],
-    };
+    console.error(`MCP Debug: Error fetching term info for id=${id}:`, error);
+    return { error: `Error fetching term info for "${id}": ${error}` };
   }
 }
 
-async function handleRunQuery(args: { id: string; query_type: string }) {
-  const { id, query_type } = args;
+async function handleGetTermInfo(args: { id: string | string[] }) {
+  const { id } = args;
 
-  // If the LLM accidentally passes a tool name as query_type, redirect to the correct handler
-  if (query_type === 'get_term_info') {
-    const result = await handleGetTermInfo({ id });
-    // Prepend a hint so the LLM learns to use the correct tool next time
-    if (result.content && result.content.length > 0 && result.content[0].type === 'text') {
-      result.content[0].text = `Note: "get_term_info" is a separate tool, not a query_type for run_query. Use the get_term_info tool directly next time. Here are the results:\n\n${result.content[0].text}`;
-    }
-    return result;
-  }
-
-  if (query_type === 'search_terms') {
+  // Single ID — preserve original response format
+  if (typeof id === 'string') {
+    const result = await fetchSingleTermInfo(id);
     return {
       content: [
         {
           type: 'text',
-          text: `Note: "search_terms" is a separate tool, not a query_type for run_query. Use the search_terms tool directly with a query parameter. Valid query_types for run_query include: PaintedDomains, etc.`,
+          text: result.error || JSON.stringify(result.data, null, 2),
         },
       ],
     };
+  }
+
+  // Batch IDs — run in parallel, return keyed object
+  const ids = id;
+  const results = await Promise.all(ids.map(async (singleId) => {
+    const result = await fetchSingleTermInfo(singleId);
+    return { id: singleId, ...result };
+  }));
+
+  const keyed: Record<string, any> = {};
+  for (const r of results) {
+    keyed[r.id] = r.error ? { error: r.error } : r.data;
+  }
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(keyed, null, 2),
+      },
+    ],
+  };
+}
+
+async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?: any; error?: string; redirect?: string }> {
+  // If the LLM accidentally passes a tool name as query_type, redirect
+  if (query_type === 'get_term_info') {
+    return { redirect: `Note: "get_term_info" is a separate tool, not a query_type for run_query. Use the get_term_info tool directly next time.` };
+  }
+  if (query_type === 'search_terms') {
+    return { redirect: `Note: "search_terms" is a separate tool, not a query_type for run_query. Use the search_terms tool directly with a query parameter.` };
   }
 
   const url = `https://v3-cached.virtualflybrain.org/run_query?id=${id}&query_type=${query_type}`;
-
+  console.error(`MCP Debug: Running query id=${id} query_type=${query_type}`);
   try {
     const response = await axios.get(url);
     if (response.data === null || response.data === undefined) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `No results for query "${query_type}" on ID "${id}". This ID may not exist, may be deprecated, or this query type may not be supported for this entity. Try using the search_terms tool to verify the ID exists.`,
-          },
-        ],
-      };
+      console.error(`MCP Debug: No results for query id=${id} query_type=${query_type}`);
+      return { error: `No results for query "${query_type}" on ID "${id}". This ID may not exist, may be deprecated, or this query type may not be supported for this entity. Try using the search_terms tool to verify the ID exists.` };
     }
-    
-    // Check if the response contains an error
     if (response.data.error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `${response.data.error}\n\nTo find valid query types for this term, first use the get_term_info tool with ID "${id}" to see the available queries in the "Queries" array. This will show you the supported query types and expected result counts for this specific entity.`,
-          },
-        ],
-      };
+      console.error(`MCP Debug: API error for query id=${id} query_type=${query_type}: ${response.data.error}`);
+      return { error: `${response.data.error}\n\nTo find valid query types for this term, first use the get_term_info tool with ID "${id}" to see the available queries in the "Queries" array.` };
     }
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(response.data, null, 2),
-        },
-      ],
-    };
+    console.error(`MCP Debug: Successfully ran query id=${id} query_type=${query_type}`);
+    return { data: response.data };
   } catch (error) {
+    console.error(`MCP Debug: Error running query id=${id} query_type=${query_type}:`, error);
+    return { error: `Error running query "${query_type}" on "${id}": ${error}` };
+  }
+}
+
+async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> }) {
+  const { id, query_type, queries } = args;
+
+  // Build the list of {id, query_type} pairs to execute
+  let queryPairs: Array<{ id: string; query_type: string }>;
+
+  if (queries && queries.length > 0) {
+    // Explicit queries array takes precedence
+    queryPairs = queries;
+  } else if (id && query_type) {
+    // Single or array of IDs with shared query_type
+    const ids = Array.isArray(id) ? id : [id];
+    queryPairs = ids.map(singleId => ({ id: singleId, query_type }));
+  } else {
     return {
-      content: [
-        {
-          type: 'text',
-          text: `Error running query: ${error}`,
-        },
-      ],
+      content: [{ type: 'text', text: 'Error: Either provide id + query_type, or a queries array of {id, query_type} pairs.' }],
     };
   }
+
+  // Single query — preserve original response format
+  if (queryPairs.length === 1) {
+    const pair = queryPairs[0];
+    const result = await fetchSingleQuery(pair.id, pair.query_type);
+
+    if (result.redirect) {
+      // Tool name was passed as query_type — try to be helpful
+      const termResult = await fetchSingleTermInfo(pair.id);
+      const termText = termResult.error || JSON.stringify(termResult.data, null, 2);
+      return {
+        content: [{ type: 'text', text: `${result.redirect}\n\n${termText}` }],
+      };
+    }
+
+    return {
+      content: [{ type: 'text', text: result.error || JSON.stringify(result.data, null, 2) }],
+    };
+  }
+
+  // Batch queries — run in parallel, return keyed object
+  const results = await Promise.all(queryPairs.map(async (pair) => {
+    const result = await fetchSingleQuery(pair.id, pair.query_type);
+    const key = `${pair.id}::${pair.query_type}`;
+    return { key, result };
+  }));
+
+  const keyed: Record<string, any> = {};
+  for (const { key, result } of results) {
+    if (result.redirect) {
+      keyed[key] = { error: result.redirect };
+    } else if (result.error) {
+      keyed[key] = { error: result.error };
+    } else {
+      keyed[key] = result.data;
+    }
+  }
+
+  return {
+    content: [{ type: 'text', text: JSON.stringify(keyed, null, 2) }],
+  };
 }
 
 async function handleSearchTerms(args: { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean }) {
@@ -429,7 +540,7 @@ async function handleSearchTerms(args: { query: string; filter_types?: string[];
   }
 }
 
-function createServer(sessionIdHolder?: { id?: string }): Server {
+function createServer(sessionIdHolder?: RequestContext): Server {
   const server = new Server(
     {
       name: 'vfb3-mcp-server',
@@ -669,19 +780,29 @@ async function runHttpMode() {
     }));
   });
 
+  // Trust X-Forwarded-For from HA proxy
+  app.set('trust proxy', true);
+
   // Handle POST requests: stateless — fresh server + transport per request
   app.post('/', async (req: any, res: any) => {
     try {
+      // Extract client IP: X-Forwarded-For (first entry) > X-Real-IP > req.ip
+      const xForwardedFor = req.headers['x-forwarded-for'];
+      const clientIp = (typeof xForwardedFor === 'string' ? xForwardedFor.split(',')[0].trim() : undefined)
+        || req.headers['x-real-ip']
+        || req.ip
+        || 'unknown';
+
       // Log the incoming MCP request on a single line for clean log ingestion
       const requestBody = req.body && typeof req.body === 'object' ? req.body : {};
       const requestJson = JSON.stringify(requestBody);
       const requestLine = requestJson.replace(/\s+/g, ' ').trim();
-      console.error(`MCP Debug: HTTP request: POST / - body: ${requestLine}`);
+      console.error(`MCP Debug: HTTP request: POST / client_ip=${clientIp} - body: ${requestLine}`);
 
       // Create a fresh server and transport for every request.
       // sessionIdGenerator: undefined = stateless mode — no session ID is
       // generated, returned, or validated. Any replica can handle any request.
-      const server = createServer();
+      const server = createServer({ clientIp });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
