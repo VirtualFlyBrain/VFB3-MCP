@@ -178,6 +178,46 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 - **_truncation**: Metadata when `minimize_results=true` indicating if results were limited
 - **_term_info**: Automatically fetched term details when `auto_fetch_term_info=true` and exact match found
 
+## Additional VFBquery Endpoints (Stocks & Connectivity)
+
+The VFB MCP server also surfaces a set of newer endpoints from the VFBquery service. These are useful when you need to connect VFB entities to real-world resources (stock centers, publications) or run connectivity queries across connectome datasets.
+
+### `resolve_entity`
+Use this tool when you have a **FlyBase-related name** (e.g., a GAL4 driver line, split-GAL4 combination label, or cell type label) and want to resolve it to VFB/FlyBase IDs and metadata.
+
+Note: This is not the same as searching VFB ontology terms — for VFB ontology lookups (e.g., anatomical terms or neuron IDs) use `search_terms` and `get_term_info`.
+
+Example use cases:
+- User asks for a specific GAL4 driver line by name
+- A paper mentions a cell type label and you need the corresponding VFB ID
+
+### `find_stocks`
+Use this tool when you want to find stock center entries (e.g., Bloomington, VDRC) associated with a FlyBase feature ID (usually a driver line, enhancer, or tool line).
+
+Example use cases:
+- User wants to know where to order a driver line for the neuron they are exploring
+- Link a FlyBase feature to physical reagents in stock centers
+
+### `resolve_combination` & `find_combo_publications`
+These tools operate on split-GAL4 combinations:
+- `resolve_combination` resolves a combination name to its underlying GAL4 hemidrivers and IDs
+- `find_combo_publications` retrieves publications linked to a given FlyBase combination ID (fbco_id)
+
+Use them when the user is exploring split-GAL4 resources or wants literature references for a combination.
+
+### `list_connectome_datasets` & `query_connectivity`
+These tools let you explore synaptic connectivity across available connectome datasets.
+- `list_connectome_datasets` returns available datasets (e.g., Hemibrain, FAFB)
+- `query_connectivity` runs connectivity queries across those datasets using filters like upstream/downstream neuron classes, minimum synapse weight, and dataset exclusions
+
+**Important:** `upstream_type` and `downstream_type` are best specified using **neuron class IDs** (OWL IDs start with `FBbt_`, e.g., `FBbt_00000001`). Other FlyBase IDs (e.g., `FBgn123456`, `FBst123456`) do not include an underscore; only `FBbt_...` follows the OWL format.
+
+> **Tip:** If you have a VFB neuron ID (e.g., `VFB_...`), run `get_term_info` on it and look for the `FBbt_...` class identifier in the response; use that as the `upstream_type`/`downstream_type` value for connectivity queries.
+
+Example query scenarios:
+- Ask "Which neurons connect to the mushroom body in Hemibrain?"
+- Filter connectivity results by synapse strength (weight) or by excluding a dataset (e.g., exclude hemibrain)
+
 ## How to Interpret Image Data
 
 VFB provides multiple types of images:

@@ -88,6 +88,87 @@ This file contains examples of how to use the VFB3-MCP server tools.
 }
 ```
 
+### 7. Resolve an Entity Name
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "resolve_entity",
+    "arguments": {
+      "name": "Hb9-GAL4"
+    }
+  }
+}
+```
+
+### 8. Find Stocks for a Feature ID
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "find_stocks",
+    "arguments": {
+      "feature_id": "FBst123456",
+      "collection_filter": "Bloomington"
+    }
+  }
+}
+```
+
+### 9. Resolve a Split-GAL4 Combination
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "resolve_combination",
+    "arguments": {
+      "name": "SS04495" 
+    }
+  }
+}
+```
+
+### 10. Find Publications for a Split-GAL4 Combination
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "find_combo_publications",
+    "arguments": {
+      "fbco_id": "FBco_0001234"
+    }
+  }
+}
+```
+
+### 11. List Connectome Datasets
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "list_connectome_datasets",
+    "arguments": {}
+  }
+}
+```
+
+### 12. Query Connectivity
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "query_connectivity",
+    "arguments": {
+      "upstream_type": "FBbt_00000001",
+      "downstream_type": "FBbt_00000002",
+      "weight": 5,
+      "group_by_class": true,
+      "exclude_dbs": ["hemibrain"]
+    }
+  }
+}
+```
+
 ## Integration with MCP Clients
 
 ### Claude Desktop

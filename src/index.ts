@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.6.2';
+const VERSION = '1.7.0';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -216,6 +216,104 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
             required: ['query'],
           },
         },
+        {
+          name: 'resolve_entity',
+          description: 'Resolve a FlyBase-related name (e.g., GAL4 driver line, cell type label, split-GAL4 combo label) into VFB/FlyBase IDs and metadata using the VFBquery resolve_entity endpoint. This is not the same as VFB term search (use search_terms for VFB ontology lookups).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'FlyBase-related name to resolve (e.g., "Hb9-GAL4" or "PAM cluster").',
+              },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'find_stocks',
+          description: 'Find fly stocks associated with a FlyBase feature ID (e.g., driver line, enhancer, or toolkit) using the VFBquery stocks endpoint.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              feature_id: {
+                type: 'string',
+                description: 'FlyBase feature ID (starts with FBgn, FBal, FBti, FBtp, FBco, FBst, etc.).',
+              },
+              collection_filter: {
+                type: 'string',
+                description: 'Optional collection name to filter stocks (e.g., "Bloomington").',
+              },
+            },
+            required: ['feature_id'],
+          },
+        },
+        {
+          name: 'resolve_combination',
+          description: 'Resolve a split-GAL4 combination name into its component IDs using the VFBquery resolve_combination endpoint.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Combination name or label to resolve.',
+              },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'find_combo_publications',
+          description: 'Find publications linked to a specific split-GAL4 combination (fbco_id).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              fbco_id: {
+                type: 'string',
+                description: 'FlyBase combination ID (e.g., FBco_XXXXXX).',
+              },
+            },
+            required: ['fbco_id'],
+          },
+        },
+        {
+          name: 'list_connectome_datasets',
+          description: 'List available connectome datasets (e.g., FAFB, Hemibrain) that can be queried for connectivity data.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
+        {
+          name: 'query_connectivity',
+          description: 'Run connectivity queries across connectome datasets (e.g., Hemibrain, FAFB). Use upstream/downstream filters to focus on neuron types or classes.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              upstream_type: {
+                type: 'string',
+                description: 'Optional upstream neuron class ID (OWL ID, starts with "FBbt_", e.g. "FBbt_00000001") or class name. This filters connectivity to inputs targeting that neuron class.',
+              },
+              downstream_type: {
+                type: 'string',
+                description: 'Optional downstream neuron class ID (OWL ID, starts with "FBbt_", e.g. "FBbt_00000001") or class name. This filters connectivity to outputs from that neuron class.',
+              },
+              weight: {
+                type: 'number',
+                description: 'Minimum synapse weight to include in results (e.g., 5).',
+              },
+              group_by_class: {
+                type: 'boolean',
+                description: 'If true, group results by neuron class rather than individual cells.',
+              },
+              exclude_dbs: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'List of dataset IDs to exclude (e.g., ["hemibrain", "fafb"]).',
+              },
+            },
+          },
+        },
       ],
     };
   });
@@ -240,6 +338,18 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> });
         case 'search_terms':
           return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
+        case 'resolve_entity':
+          return await handleResolveEntity(args as { name: string });
+        case 'find_stocks':
+          return await handleFindStocks(args as { feature_id: string; collection_filter?: string });
+        case 'resolve_combination':
+          return await handleResolveCombination(args as { name: string });
+        case 'find_combo_publications':
+          return await handleFindComboPublications(args as { fbco_id: string });
+        case 'list_connectome_datasets':
+          return await handleListConnectomeDatasets();
+        case 'query_connectivity':
+          return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[] });
         default:
           console.error('MCP Debug: Unknown tool requested:', name);
           throw new McpError(
@@ -540,6 +650,93 @@ async function handleSearchTerms(args: { query: string; filter_types?: string[];
   }
 }
 
+// ---------------------------------------------------------------------------
+// FlyBase & Connectivity handlers — call VFBquery REST endpoints directly
+// ---------------------------------------------------------------------------
+
+const VFBQUERY_BASE = 'https://v3-cached.virtualflybrain.org';
+
+async function handleResolveEntity(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const url = `${VFBQUERY_BASE}/resolve_entity?name=${encodeURIComponent(args.name)}`;
+  console.error(`MCP Debug: resolve_entity name="${args.name}"`);
+  try {
+    const response = await axios.get(url);
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error resolving entity "${args.name}": ${error}` }] };
+  }
+}
+
+async function handleFindStocks(args: { feature_id: string; collection_filter?: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
+  let url = `${VFBQUERY_BASE}/find_stocks?feature_id=${encodeURIComponent(args.feature_id)}`;
+  if (args.collection_filter) {
+    url += `&collection_filter=${encodeURIComponent(args.collection_filter)}`;
+  }
+  console.error(`MCP Debug: find_stocks feature_id="${args.feature_id}" collection_filter="${args.collection_filter || ''}"`);
+  try {
+    const response = await axios.get(url);
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error finding stocks for "${args.feature_id}": ${error}` }] };
+  }
+}
+
+async function handleResolveCombination(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const url = `${VFBQUERY_BASE}/resolve_combination?name=${encodeURIComponent(args.name)}`;
+  console.error(`MCP Debug: resolve_combination name="${args.name}"`);
+  try {
+    const response = await axios.get(url);
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error resolving combination "${args.name}": ${error}` }] };
+  }
+}
+
+async function handleFindComboPublications(args: { fbco_id: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const url = `${VFBQUERY_BASE}/find_combo_publications?fbco_id=${encodeURIComponent(args.fbco_id)}`;
+  console.error(`MCP Debug: find_combo_publications fbco_id="${args.fbco_id}"`);
+  try {
+    const response = await axios.get(url);
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error finding publications for "${args.fbco_id}": ${error}` }] };
+  }
+}
+
+async function handleListConnectomeDatasets(): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const url = `${VFBQUERY_BASE}/list_connectome_datasets`;
+  console.error('MCP Debug: list_connectome_datasets');
+  try {
+    const response = await axios.get(url);
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error listing connectome datasets: ${error}` }] };
+  }
+}
+
+async function handleQueryConnectivity(args: {
+  upstream_type?: string;
+  downstream_type?: string;
+  weight?: number;
+  group_by_class?: boolean;
+  exclude_dbs?: string[];
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const params = new URLSearchParams();
+  if (args.upstream_type) params.set('upstream_type', args.upstream_type);
+  if (args.downstream_type) params.set('downstream_type', args.downstream_type);
+  if (args.weight !== undefined) params.set('weight', String(args.weight));
+  if (args.group_by_class !== undefined) params.set('group_by_class', String(args.group_by_class));
+  if (args.exclude_dbs) params.set('exclude_dbs', args.exclude_dbs.join(','));
+  const url = `${VFBQUERY_BASE}/query_connectivity?${params.toString()}`;
+  console.error(`MCP Debug: query_connectivity params=${params.toString()}`);
+  try {
+    const response = await axios.get(url);
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error querying connectivity: ${error}` }] };
+  }
+}
+
 function createServer(sessionIdHolder?: RequestContext): Server {
   const server = new Server(
     {
@@ -728,6 +925,12 @@ function getHtmlPage(): string {
     <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
     <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
     <li><code>search_terms</code> - Search for VFB terms using the Solr search server with filtering options</li>
+    <li><code>resolve_entity</code> - Resolve a name (e.g., driver line or cell type label) to VFB IDs and metadata</li>
+    <li><code>find_stocks</code> - Find fly stocks for a FlyBase feature ID (e.g., driver line, enhancer, or tool line)</li>
+    <li><code>resolve_combination</code> - Resolve a split-GAL4 combination name to its underlying IDs</li>
+    <li><code>find_combo_publications</code> - Find publications associated with a split-GAL4 combination</li>
+    <li><code>list_connectome_datasets</code> - List available connectome datasets (e.g., Hemibrain, FAFB)</li>
+    <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters</li>
   </ul>
 
   <h2>🧠 About VirtualFlyBrain</h2>
