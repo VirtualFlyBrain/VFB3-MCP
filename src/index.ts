@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.7.1';
+const VERSION = '1.7.2';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -657,7 +657,7 @@ async function handleSearchTerms(args: { query: string; filter_types?: string[];
 const VFBQUERY_BASE = 'https://v3-cached.virtualflybrain.org';
 
 async function handleResolveEntity(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const url = `${VFBQUERY_BASE}/resolve_entity?name=${encodeURIComponent(args.name)}`;
+  const url = `${VFBQUERY_BASE}/resolve_entity?query=${encodeURIComponent(args.name)}`;
   console.error(`MCP Debug: resolve_entity name="${args.name}"`);
   try {
     const response = await axios.get(url);
@@ -668,9 +668,9 @@ async function handleResolveEntity(args: { name: string }): Promise<{ content: A
 }
 
 async function handleFindStocks(args: { feature_id: string; collection_filter?: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  let url = `${VFBQUERY_BASE}/find_stocks?feature_id=${encodeURIComponent(args.feature_id)}`;
+  let url = `${VFBQUERY_BASE}/find_stocks?id=${encodeURIComponent(args.feature_id)}`;
   if (args.collection_filter) {
-    url += `&collection_filter=${encodeURIComponent(args.collection_filter)}`;
+    url += `&collection=${encodeURIComponent(args.collection_filter)}`;
   }
   console.error(`MCP Debug: find_stocks feature_id="${args.feature_id}" collection_filter="${args.collection_filter || ''}"`);
   try {
@@ -682,7 +682,7 @@ async function handleFindStocks(args: { feature_id: string; collection_filter?: 
 }
 
 async function handleResolveCombination(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const url = `${VFBQUERY_BASE}/resolve_combination?name=${encodeURIComponent(args.name)}`;
+  const url = `${VFBQUERY_BASE}/resolve_combination?query=${encodeURIComponent(args.name)}`;
   console.error(`MCP Debug: resolve_combination name="${args.name}"`);
   try {
     const response = await axios.get(url);
@@ -693,7 +693,7 @@ async function handleResolveCombination(args: { name: string }): Promise<{ conte
 }
 
 async function handleFindComboPublications(args: { fbco_id: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const url = `${VFBQUERY_BASE}/find_combo_publications?fbco_id=${encodeURIComponent(args.fbco_id)}`;
+  const url = `${VFBQUERY_BASE}/find_combo_publications?id=${encodeURIComponent(args.fbco_id)}`;
   console.error(`MCP Debug: find_combo_publications fbco_id="${args.fbco_id}"`);
   try {
     const response = await axios.get(url);
