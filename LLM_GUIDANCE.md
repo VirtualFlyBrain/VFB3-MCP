@@ -178,45 +178,215 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 - **_truncation**: Metadata when `minimize_results=true` indicating if results were limited
 - **_term_info**: Automatically fetched term details when `auto_fetch_term_info=true` and exact match found
 
-## Additional VFBquery Endpoints (Stocks & Connectivity)
+## FlyBase Entity Resolution & Stocks Workflow
 
-The VFB MCP server also surfaces a set of newer endpoints from the VFBquery service. These are useful when you need to connect VFB entities to real-world resources (stock centers, publications) or run connectivity queries across connectome datasets.
+**When to use:** User asks about fly stocks, driver lines, GAL4 lines, alleles, insertions, or split-GAL4 combinations and wants to find available stocks or resolve names to IDs.
 
-### `resolve_entity`
-Use this tool when you have a **FlyBase-related name** (e.g., a GAL4 driver line, split-GAL4 combination label, or cell type label) and want to resolve it to VFB/FlyBase IDs and metadata.
+**Important:** `resolve_entity` queries FlyBase Chado — for VFB ontology lookups (anatomical terms, neuron class IDs) use `search_terms` and `get_term_info` instead.
 
-Note: This is not the same as searching VFB ontology terms — for VFB ontology lookups (e.g., anatomical terms or neuron IDs) use `search_terms` and `get_term_info`.
+### Workflow
 
-Example use cases:
-- User asks for a specific GAL4 driver line by name
-- A paper mentions a cell type label and you need the corresponding VFB ID
+1. **Parse input** — Identify whether the user provides a name, synonym, or FlyBase ID:
+   - `FBgn\d+` → gene ID (direct to `find_stocks`)
+   - `FBal\d+` → allele ID (direct to `find_stocks`)
+   - `FBti\d+` → insertion ID (direct to `find_stocks`)
+   - `FBco\d+` → combination ID (direct to `find_stocks`)
+   - `FBst\d+` → stock ID (direct to `find_stocks`)
+   - Any other string → resolve first with `resolve_entity`
 
-### `find_stocks`
-Use this tool when you want to find stock center entries (e.g., Bloomington, VDRC) associated with a FlyBase feature ID (usually a driver line, enhancer, or tool line).
+2. **Resolve entity** — If user provides a name (not an ID), call `resolve_entity`. It uses tiered resolution:
+   - Exact match on feature name
+   - Synonym match (case-insensitive)
+   - Broad pattern match (ILIKE)
 
-Example use cases:
-- User wants to know where to order a driver line for the neuron they are exploring
-- Link a FlyBase feature to physical reagents in stock centers
+3. **Confirm with user** — **Critical:**
+   - If match was via **SYNONYM or BROAD**, show the resolved entity and ask user to confirm before proceeding. Example: *"Your search for 'CG9885' matched **dpp** (FBgn0000490, gene) via synonym. Shall I find stocks for this gene?"*
+   - If **multiple matches**, show a disambiguation list (name, ID, type) and ask user to choose.
+   - **Wait for user reply** — do NOT assume confirmation.
 
-### `resolve_combination` & `find_combo_publications`
-These tools operate on split-GAL4 combinations:
-- `resolve_combination` resolves a combination name to its underlying GAL4 hemidrivers and IDs
-- `find_combo_publications` retrieves publications linked to a given FlyBase combination ID (fbco_id)
+4. **Find stocks** — Call `find_stocks` with the resolved FlyBase feature ID. Include `collection_filter` if user specified a stock centre.
 
-Use them when the user is exploring split-GAL4 resources or wants literature references for a combination.
+5. **Present results:**
+   - Always start with a **query summary block**:
+     ```
+     Query:
+     - Entity:      dpp (FBgn0000490, gene)
+     - Search mode: gene → alleles → stocks
+     - Collection:  (all)
+     Results: 45 stocks across 12 alleles from 3 stock centres
+     ```
+   - **≤30 rows:** Show full table
+   - **>30 rows:** Show total stock count, allele count, breakdown by stock collection, top 20 rows sorted by collection then allele, note that results are truncated
+   - For every stock, include FlyBase link: `https://flybase.org/reports/{FBst_ID}`
+   - Include entity report link: `https://flybase.org/reports/{feature_id}`
 
-### `list_connectome_datasets` & `query_connectivity`
-These tools let you explore synaptic connectivity across available connectome datasets.
-- `list_connectome_datasets` returns available datasets (e.g., Hemibrain, FAFB)
-- `query_connectivity` runs connectivity queries across those datasets using filters like upstream/downstream neuron classes, minimum synapse weight, and dataset exclusions
+6. **Follow-up offers:**
+   - "I can filter these to show only stocks from a specific centre (Bloomington, Kyoto, VDRC, etc.)"
+   - "To see stocks for a specific allele, give me the allele symbol or ID"
+   - "I can look up the full genotype for any stock listed"
+   - "I can look up this entity in VFB for anatomical and expression data"
 
-**Important:** `upstream_type` and `downstream_type` are best specified using **neuron class IDs** (OWL IDs start with `FBbt_`, e.g., `FBbt_00000001`). Other FlyBase IDs (e.g., `FBgn123456`, `FBst123456`) do not include an underscore; only `FBbt_...` follows the OWL format.
+### ID Type Routing Reference
 
-> **Tip:** If you have a VFB neuron ID (e.g., `VFB_...`), run `get_term_info` on it and look for the `FBbt_...` class identifier in the response; use that as the `upstream_type`/`downstream_type` value for connectivity queries.
+| ID prefix | Query strategy |
+|-----------|---------------|
+| FBgn (gene) | 4-path UNION: direct allele, allele→construct→insertion, allele→associated insertion, regulatory region |
+| FBal (allele) | 3-path UNION: direct, construct, associated insertion |
+| FBti (insertion) | Direct feature_genotype path |
+| FBco (combination) | Resolve component alleles first, then allele paths for each |
+| FBst (stock) | Direct stock lookup |
 
-Example query scenarios:
-- Ask "Which neurons connect to the mushroom body in Hemibrain?"
-- Filter connectivity results by synapse strength (weight) or by excluding a dataset (e.g., exclude hemibrain)
+---
+
+## Split-GAL4 Combination Publications Workflow
+
+**When to use:** User asks about publications for a split-GAL4 combination, or asks "what papers describe [combination name]?"
+
+### Workflow
+
+1. **Parse input** — Accept FBco IDs (e.g., `FBco0000052`), full combination names, or common synonyms (e.g., "MB002B", "SS04495").
+
+2. **Resolve combination** — If input is not an FBco ID, call `resolve_combination` first. Uses tiered resolution: exact name → synonym → broad pattern match.
+
+3. **Confirm with user** — **Critical:**
+   - If match was via **synonym**, show the resolved formal name and FBco ID, ask user to confirm. Example: *"Your search for 'MB002B' matched **Scer\GAL4[DBD.R14C08]∩Hsap\RELA[AD.R12C11]** (FBco0000052) via synonym. Shall I find publications for this combination?"*
+   - If **multiple matches**, show disambiguation list and ask user to choose.
+   - **Wait for user reply** — do NOT assume confirmation.
+
+4. **Find publications** — Call `find_combo_publications` with the FBco ID.
+
+5. **Present results:**
+   - **Query summary block:**
+     ```
+     Query:
+     - Combination: Scer\GAL4[DBD.R14C08]∩Hsap\RELA[AD.R12C11] (FBco0000052)
+     - Synonym used: MB002B
+     Results: 6 publications (2014–2022)
+     ```
+   - For each publication show:
+     - **Title** with year
+     - **Citation** (miniref)
+     - **Links** (only where identifier exists):
+       - FlyBase: `https://flybase.org/reports/{FBrf_ID}`
+       - DOI: `https://doi.org/{DOI}`
+       - PubMed: `https://pubmed.ncbi.nlm.nih.gov/{PMID}/`
+   - Include FlyBase report link for the combination: `https://flybase.org/reports/{FBco_ID}`
+
+6. **Follow-up offers:**
+   - "I can fetch the full text of any of these papers via Europe PMC"
+   - "I can look up detailed metadata (authors, abstract) for any publication"
+   - "I can search for other combinations that share a component allele"
+   - "I can look up stocks for this combination"
+
+---
+
+## Connectivity Query Workflow
+
+**When to use:** User asks about synaptic connections between neuron types, upstream/downstream partners, or connectivity patterns.
+
+**DO NOT USE for:**
+- Individual neuron-to-neuron connections (use `run_query` with `NeuronNeuronConnectivityQuery` instead)
+- Connections between muscles and neurons or sense organs and neurons
+
+### Workflow
+
+1. **Parse input** — Extract parameters using this inference table:
+
+   | User says | Mode |
+   |-----------|------|
+   | "upstream of X", "inputs to X", "presynaptic to X" | set `downstream_type` = X |
+   | "downstream of X", "outputs from X", "postsynaptic to X" | set `upstream_type` = X |
+   | "between X and Y", "X to Y connections" | set both `upstream_type` = X, `downstream_type` = Y |
+   | "all connections from X" | set `upstream_type` = X only |
+   | "summarise by class", "aggregated" | set `group_by_class` = true |
+
+   **Defaults:** `weight` = 5, `exclude_dbs` = ["hb", "fafb"] (unless user specifies otherwise)
+
+2. **Confirm parameters** — Unless user explicitly specified all parameters, show planned query and ask to confirm:
+   ```
+   I'll query connectivity with these parameters:
+   - Upstream type:   transmedullary neuron Tm1
+   - Downstream type: (any)
+   - Min. weight:     5
+   - Excluded DBs:    hb, fafb
+   - Group by class:  No
+   Shall I proceed, or would you like to change any of these?
+   ```
+
+3. **Validate neuron type names** — Use `search_terms` with `filter_types: ["neuron", "class"]` to validate/canonicalize labels. Skip if label is already clearly canonical (e.g., "GABAergic neuron"). If ambiguous or multiple candidates, show disambiguation list and ask user.
+
+   > **Tip:** If user asks about a brain region (e.g., "What connects to the lobula?"), first find neuron classes in that region using `search_terms`, then query connectivity for those specific classes.
+
+   > **Tip:** If you have a VFB neuron ID (e.g., `VFB_...`), run `get_term_info` on it and look for the `FBbt_...` class identifier; use that as `upstream_type`/`downstream_type`.
+
+4. **Execute query** — Call `query_connectivity` with confirmed parameters.
+
+5. **Handle results:**
+
+   **Per-neuron mode** (`group_by_class=false`):
+   - Columns: upstream_class, upstream_neuron_id, upstream_neuron_name, weight, downstream_neuron_id, downstream_neuron_name, downstream_class, data_source, accession
+   - **>50 rows:** Show total connection count, top 20 sorted by weight descending, summary stats (unique upstream neurons, unique downstream neurons, weight range)
+   - **≤50 rows:** Show full table
+
+   **Class mode** (`group_by_class=true`):
+   - Columns: upstream_class, downstream_class, total_upstream_count, connected_upstream_count, percent_connected, pairwise_connections, total_weight, average_weight
+   - Present ranked by `pairwise_connections` descending
+
+   **Zero results — relaxation loop:**
+   1. Lower weight to 1 → report count
+   2. Remove exclude_dbs (include all datasets) → report count
+   3. Try `group_by_class=true` → report count
+   4. Show user what was tried and let them decide which relaxation to apply
+
+   **Error:** Confirm neuron types with user, suggest using `search_terms` to find correct terms, retry.
+
+6. **Output format** — Always include a resolved terms block:
+   ```
+   Query:
+   - Upstream type:   transmedullary neuron Tm1 (FBbt_00003789)
+   - Downstream type: (any)
+   - Min. weight:     5
+   - Excluded DBs:    hb, fafb
+   - Group by class:  No
+
+   Results: 142 connections across 28 upstream neurons → 85 downstream neurons
+   ```
+
+7. **Follow-up offers:**
+   - "To get full details on any neuron, I can look it up in VFB using its ID"
+   - "To find what connects *back* to [type], I can swap upstream/downstream and re-run"
+   - "To aggregate these results by neuron class, I can re-run with group_by_class=true"
+   - "You can view any neuron at `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={short_form}`"
+
+---
+
+## Cross-tool Patterns
+
+These patterns apply across all the entity resolution and query tools:
+
+### Tiered Resolution
+All resolve tools (`resolve_entity`, `resolve_combination`) use cascading resolution: exact name → synonym → broad pattern match. Always confirm non-exact matches (SYNONYM/BROAD) with the user before proceeding to further queries.
+
+### Disambiguation
+When multiple matches are returned by any resolve tool, present a numbered list showing name, ID, and type for each match. Ask the user to pick one before continuing.
+
+### Link Conventions
+Always provide appropriate links in results:
+- **FlyBase reports:** `https://flybase.org/reports/{ID}` (for FBgn, FBal, FBti, FBco, FBst, FBrf IDs)
+- **VFB browser:** `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={VFB_ID}` (for VFB IDs)
+- **DOI:** `https://doi.org/{DOI}`
+- **PubMed:** `https://pubmed.ncbi.nlm.nih.gov/{PMID}/`
+
+### Error Recovery
+- If an API call fails, explain the error clearly and suggest alternatives (check spelling, try a FlyBase ID directly, use `search_terms` to validate)
+- If entity not found, suggest broader search or checking spelling
+- If connectivity query returns error about unrecognized type, use `search_terms` to find the correct neuron class term
+
+### Tool Chaining
+The typical flow is: **resolve** (get IDs) → **query** (get data) → **present** (format for user):
+- `resolve_entity` → `find_stocks`
+- `resolve_combination` → `find_combo_publications`
+- `search_terms` (validate neuron class) → `query_connectivity`
 
 ## How to Interpret Image Data
 

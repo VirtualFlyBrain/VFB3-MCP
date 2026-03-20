@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -218,13 +218,13 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'resolve_entity',
-          description: 'Resolve a FlyBase-related name (e.g., GAL4 driver line, cell type label, split-GAL4 combo label) into VFB/FlyBase IDs and metadata using the VFBquery resolve_entity endpoint. This is not the same as VFB term search (use search_terms for VFB ontology lookups).',
+          description: 'Resolve a FlyBase-related name into VFB/FlyBase IDs and metadata. Accepts GAL4 driver line names (e.g., "Hb9-GAL4"), split-GAL4 synonyms (e.g., "SS04495", "MB002B"), cell type labels (e.g., "PAM cluster"), gene symbols, or FlyBase IDs (FBgn/FBal/FBti/FBco). Uses tiered resolution: exact name → synonym → broad pattern match. Returns match_type (EXACT/SYNONYM/BROAD), feature ID, name, type, and synonyms. IMPORTANT: When match_type is SYNONYM or BROAD, always confirm the resolved entity with the user before proceeding to further queries. If multiple matches are returned, show a disambiguation list and ask the user to choose. This tool queries FlyBase Chado — for VFB ontology lookups (anatomical terms, neuron class IDs) use search_terms instead.',
           inputSchema: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description: 'FlyBase-related name to resolve (e.g., "Hb9-GAL4" or "PAM cluster").',
+                description: 'FlyBase-related name to resolve — accepts GAL4 names (e.g., "Hb9-GAL4"), split-GAL4 synonyms (e.g., "SS04495", "MB002B"), cell type labels (e.g., "PAM cluster"), gene symbols (e.g., "dpp"), or FlyBase IDs (FBgn/FBal/FBti/FBco).',
               },
             },
             required: ['name'],
@@ -232,17 +232,17 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'find_stocks',
-          description: 'Find fly stocks associated with a FlyBase feature ID (e.g., driver line, enhancer, or toolkit) using the VFBquery stocks endpoint.',
+          description: 'Find fly stocks (stock centre entries) for a FlyBase feature. Accepts FBgn (gene), FBal (allele), FBti (insertion), FBco (split-GAL4 combination), or FBst (stock) IDs. Gene queries search 4 paths: direct allele, allele→construct→insertion, allele→associated insertion, and regulatory region routes. Combination queries resolve component hemidrivers and find stocks for each. Returns stock IDs, names, collection (stock centre), and genotype info. Present results: ≤30 rows show full table; >30 rows show total count, breakdown by stock collection, and top 20 rows. Always include FlyBase links: stock reports https://flybase.org/reports/{FBst_ID}, entity reports https://flybase.org/reports/{feature_id}. Use resolve_entity first if you have a name rather than a FlyBase ID.',
           inputSchema: {
             type: 'object',
             properties: {
               feature_id: {
                 type: 'string',
-                description: 'FlyBase feature ID (starts with FBgn, FBal, FBti, FBtp, FBco, FBst, etc.).',
+                description: 'FlyBase feature ID — FBgn (gene), FBal (allele), FBti (insertion), FBtp (construct), FBco (combination), or FBst (stock). Use resolve_entity first to obtain this from a name or synonym.',
               },
               collection_filter: {
                 type: 'string',
-                description: 'Optional collection name to filter stocks (e.g., "Bloomington").',
+                description: 'Optional stock centre name filter (case-insensitive partial match). Examples: "Bloomington", "Kyoto", "VDRC", "FlyORF", "Korea Drosophila Resource Center".',
               },
             },
             required: ['feature_id'],
@@ -250,13 +250,13 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'resolve_combination',
-          description: 'Resolve a split-GAL4 combination name into its component IDs using the VFBquery resolve_combination endpoint.',
+          description: 'Resolve a split-GAL4 combination name or synonym into its FBco ID and component hemidrivers. Accepts formal combination names, common synonyms (e.g., "MB002B", "SS04495"), or FBco IDs (e.g., "FBco0000052"). Uses tiered resolution: exact name → synonym → broad pattern match. Returns FBco ID, combination name, matched synonym (if applicable), and component allele IDs/names. IMPORTANT: When match is via synonym, confirm the resolved combination with the user before proceeding (e.g., "Your search for \'MB002B\' matched [formal name] (FBco...) via synonym. Shall I proceed?"). If multiple matches, show disambiguation list and ask user to choose.',
           inputSchema: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description: 'Combination name or label to resolve.',
+                description: 'Combination name, common synonym (e.g., "MB002B", "SS04495"), or FBco ID (e.g., "FBco0000052") to resolve.',
               },
             },
             required: ['name'],
@@ -264,13 +264,13 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'find_combo_publications',
-          description: 'Find publications linked to a specific split-GAL4 combination (fbco_id).',
+          description: 'Find publications linked to a split-GAL4 combination by FBco ID. Returns publications with: FBrf ID, title, year, miniref (short citation), publication type, and external identifiers (DOI, PMID, PMCID) where available. Results sorted by year descending. Present each publication with title, year, citation, and links where identifiers exist: FlyBase https://flybase.org/reports/{FBrf_ID}, DOI https://doi.org/{DOI}, PubMed https://pubmed.ncbi.nlm.nih.gov/{PMID}/. Also include the combination report link: https://flybase.org/reports/{FBco_ID}. Use resolve_combination first if you have a name or synonym rather than an FBco ID.',
           inputSchema: {
             type: 'object',
             properties: {
               fbco_id: {
                 type: 'string',
-                description: 'FlyBase combination ID (e.g., FBco_XXXXXX).',
+                description: 'FlyBase combination ID (e.g., "FBco0000052"). Use resolve_combination first to obtain this from a name or synonym.',
               },
             },
             required: ['fbco_id'],
@@ -278,7 +278,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'list_connectome_datasets',
-          description: 'List available connectome datasets (e.g., FAFB, Hemibrain) that can be queried for connectivity data.',
+          description: 'List available connectome datasets with their labels and symbols. Use the returned symbols when constructing exclude_dbs arguments for query_connectivity. Common datasets include Hemibrain (hb), FAFB (fafb), MANC, and others. Call this tool if unsure which dataset symbols are valid.',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -286,30 +286,30 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'query_connectivity',
-          description: 'Run connectivity queries across connectome datasets (e.g., Hemibrain, FAFB). Use upstream/downstream filters to focus on neuron types or classes.',
+          description: 'Query synaptic connectivity between Drosophila neuron classes across connectome datasets. At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections (use run_query with NeuronNeuronConnectivityQuery instead) or muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. Present large results (>50 rows) as top 20 by weight with summary stats.',
           inputSchema: {
             type: 'object',
             properties: {
               upstream_type: {
                 type: 'string',
-                description: 'Optional upstream neuron class ID (OWL ID, starts with "FBbt_", e.g. "FBbt_00000001") or class name. This filters connectivity to inputs targeting that neuron class.',
+                description: 'Upstream (presynaptic) neuron class — OWL ID (e.g., "FBbt_00003789") or full label (e.g., "transmedullary neuron Tm1"). Must be a neuron type/class, NOT an anatomical region. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize labels before querying.',
               },
               downstream_type: {
                 type: 'string',
-                description: 'Optional downstream neuron class ID (OWL ID, starts with "FBbt_", e.g. "FBbt_00000001") or class name. This filters connectivity to outputs from that neuron class.',
+                description: 'Downstream (postsynaptic) neuron class — OWL ID or full label. Must be a neuron type/class, NOT an anatomical region. If user asks about connectivity to a brain region, first find neuron classes in that region using search_terms, then query for those classes.',
               },
               weight: {
                 type: 'number',
-                description: 'Minimum synapse weight to include in results (e.g., 5).',
+                description: 'Minimum synapse count threshold (recommended default: 5). Lower to 1 if initial query returns zero results as first relaxation step.',
               },
               group_by_class: {
                 type: 'boolean',
-                description: 'If true, group results by neuron class rather than individual cells.',
+                description: 'If true, aggregate results by neuron class — returns total_weight, average_weight, percent_connected per class pair, ranked by pairwise_connections. If false (default), returns individual neuron-to-neuron rows.',
               },
               exclude_dbs: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'List of dataset IDs to exclude (e.g., ["hemibrain", "fafb"]).',
+                description: 'Dataset symbols to exclude (recommended default: ["hb", "fafb"] to focus on newer datasets). Pass empty array [] to include all datasets. Use list_connectome_datasets to see valid symbols.',
               },
             },
           },
