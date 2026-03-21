@@ -288,6 +288,25 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 - Individual neuron-to-neuron connections (use `run_query` with `NeuronNeuronConnectivityQuery` instead)
 - Connections between muscles and neurons or sense organs and neurons
 
+### Choosing the Right Connectivity Tool
+
+| | `query_connectivity` | `run_query` + `NeuronNeuronConnectivityQuery` |
+|---|---|---|
+| **Scope** | Neuron **class** to neuron **class** | Single **individual** neuron |
+| **Datasets** | Queries across **all** connectome datasets simultaneously | Single dataset (whichever the neuron belongs to) |
+| **Filtering** | Filter at **both** upstream AND downstream ends by class | Shows all partners of one neuron |
+| **Use case** | "What Tm1→T3 connections exist across all datasets?" | "What does neuron VFB_00104glj connect to?" |
+| **Data** | Live comparative connectomics (NOT pre-cached) | Pre-computed per-neuron results (fast) |
+| **Performance** | Can take minutes — use higher weight (≥50 for both-ends) or group_by_class | Fast (pre-computed) |
+
+### Performance Notes
+
+- `query_connectivity` is **not pre-cached** — it runs live queries across all connectome datasets, so responses can take up to several minutes
+- **Both-ends queries** (upstream_type AND downstream_type both set) with low weight thresholds can timeout on large neuron classes — start with `weight ≥ 50`
+- **Single-end queries** (only upstream_type or downstream_type) work well with `weight ≥ 10`
+- Use `group_by_class=true` to get faster aggregated results instead of individual neuron-to-neuron rows
+- Warn the user that connectivity queries may take a while before executing
+
 ### Workflow
 
 1. **Parse input** — Extract parameters using this inference table:

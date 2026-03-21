@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.7.2';
+const VERSION = '1.7.3';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -286,7 +286,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'query_connectivity',
-          description: 'Query synaptic connectivity between Drosophila neuron classes across connectome datasets. At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections (use run_query with NeuronNeuronConnectivityQuery instead) or muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. Present large results (>50 rows) as top 20 by weight with summary stats.',
+          description: 'Query synaptic connectivity between Drosophila neuron classes across ALL connectome datasets simultaneously for comparative connectomics. This is NOT pre-cached — it runs live queries, so expect slow responses (up to several minutes). Set both upstream_type AND downstream_type to filter connections between two specific neuron classes (e.g., "What Tm1→T3 connections exist across all datasets?"). At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections — for pre-computed connections of a single individual neuron, use run_query with NeuronNeuronConnectivityQuery instead. NOT for muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. For both-ends queries, start with weight≥50 to avoid timeouts. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. Present large results (>50 rows) as top 20 by weight with summary stats.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -730,7 +730,7 @@ async function handleQueryConnectivity(args: {
   const url = `${VFBQUERY_BASE}/query_connectivity?${params.toString()}`;
   console.error(`MCP Debug: query_connectivity params=${params.toString()}`);
   try {
-    const response = await axios.get(url);
+    const response = await axios.get(url, { timeout: 300000 }); // 5 min — live cross-dataset query
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
     return { content: [{ type: 'text', text: `Error querying connectivity: ${error}` }] };
