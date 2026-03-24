@@ -151,9 +151,9 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `get_term_info` — Get detailed metadata for a VFB ID
 - `run_query` — Run a precomputed analysis query for a VFB ID (see the `Queries` field from `get_term_info`)
 - `search_terms` — Search VFB entities by text with filtering / boosting options
-- `resolve_entity` — Resolve a FlyBase-related name (e.g., driver line or cell type label) to VFB/FlyBase IDs and metadata (not the same as VFB term search)
+- `resolve_entity` — Resolve an unresolved FlyBase-related query string (e.g., `P{VT054895-GAL4.DBD}` or a driver line / cell type label) to VFB/FlyBase IDs and metadata (not the same as VFB term search)
 - `find_stocks` — Find fly stocks for a FlyBase feature ID (e.g., driver line, enhancer, or tool line)
-- `resolve_combination` — Resolve a split-GAL4 combination name into its component IDs
+- `resolve_combination` — Resolve an unresolved split-GAL4 combination name or synonym into its component IDs
 - `find_combo_publications` — Find publications associated with a split-GAL4 combination (fbco_id)
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters

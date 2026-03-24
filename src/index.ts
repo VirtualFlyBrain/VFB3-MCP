@@ -12,7 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.7.3';
+const VERSION = '1.7.4';
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
@@ -218,13 +218,13 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'resolve_entity',
-          description: 'Resolve a FlyBase-related name into VFB/FlyBase IDs and metadata. Accepts GAL4 driver line names (e.g., "Hb9-GAL4"), split-GAL4 synonyms (e.g., "SS04495", "MB002B"), cell type labels (e.g., "PAM cluster"), gene symbols, or FlyBase IDs (FBgn/FBal/FBti/FBco). Uses tiered resolution: exact name → synonym → broad pattern match. Returns match_type (EXACT/SYNONYM/BROAD), feature ID, name, type, and synonyms. IMPORTANT: When match_type is SYNONYM or BROAD, always confirm the resolved entity with the user before proceeding to further queries. If multiple matches are returned, show a disambiguation list and ask the user to choose. This tool queries FlyBase Chado — for VFB ontology lookups (anatomical terms, neuron class IDs) use search_terms instead.',
+          description: 'Resolve an unresolved FlyBase-related query string into VFB/FlyBase IDs and metadata. Pass the raw text exactly as the user wrote it (for example "P{VT054895-GAL4.DBD}", "Hb9-GAL4", "SS04495", "MB002B", "PAM cluster", or "dpp"). Do NOT pass resolved IDs such as FBgn/FBal/FBti/FBco/FBst or VFB IDs; if you already have an ID, use the downstream tool directly. Uses tiered resolution: exact name → synonym → broad pattern match. Returns match_type (EXACT/SYNONYM/BROAD), feature ID, name, type, and synonyms. IMPORTANT: When match_type is SYNONYM or BROAD, always confirm the resolved entity with the user before proceeding to further queries. If multiple matches are returned, show a disambiguation list and ask the user to choose. This tool queries FlyBase Chado — for VFB ontology lookups (anatomical terms, neuron class IDs) use search_terms instead.',
           inputSchema: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description: 'FlyBase-related name to resolve — accepts GAL4 names (e.g., "Hb9-GAL4"), split-GAL4 synonyms (e.g., "SS04495", "MB002B"), cell type labels (e.g., "PAM cluster"), gene symbols (e.g., "dpp"), or FlyBase IDs (FBgn/FBal/FBti/FBco).',
+                description: 'Unresolved FlyBase-related query string from the user. Pass the raw name/synonym exactly as written (e.g., "P{VT054895-GAL4.DBD}", "Hb9-GAL4", "SS04495", "MB002B", "PAM cluster", "dpp"). Do NOT pass an already resolved FlyBase or VFB ID.',
               },
             },
             required: ['name'],
@@ -250,13 +250,13 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'resolve_combination',
-          description: 'Resolve a split-GAL4 combination name or synonym into its FBco ID and component hemidrivers. Accepts formal combination names, common synonyms (e.g., "MB002B", "SS04495"), or FBco IDs (e.g., "FBco0000052"). Uses tiered resolution: exact name → synonym → broad pattern match. Returns FBco ID, combination name, matched synonym (if applicable), and component allele IDs/names. IMPORTANT: When match is via synonym, confirm the resolved combination with the user before proceeding (e.g., "Your search for \'MB002B\' matched [formal name] (FBco...) via synonym. Shall I proceed?"). If multiple matches, show disambiguation list and ask user to choose.',
+          description: 'Resolve an unresolved split-GAL4 combination name or synonym into its FBco ID and component hemidrivers. Pass the raw combination text exactly as the user wrote it (for example "MB002B" or "SS04495"). Do NOT pass an FBco ID; if you already have one, use the downstream tool directly. Uses tiered resolution: exact name → synonym → broad pattern match. Returns FBco ID, combination name, matched synonym (if applicable), and component allele IDs/names. IMPORTANT: When match is via synonym, confirm the resolved combination with the user before proceeding (e.g., "Your search for \'MB002B\' matched [formal name] (FBco...) via synonym. Shall I proceed?"). If multiple matches, show disambiguation list and ask user to choose.',
           inputSchema: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description: 'Combination name, common synonym (e.g., "MB002B", "SS04495"), or FBco ID (e.g., "FBco0000052") to resolve.',
+                description: 'Unresolved split-GAL4 combination name or synonym exactly as written by the user (e.g., "MB002B", "SS04495"). Do NOT pass an FBco ID here.',
               },
             },
             required: ['name'],
@@ -655,15 +655,45 @@ async function handleSearchTerms(args: { query: string; filter_types?: string[];
 // ---------------------------------------------------------------------------
 
 const VFBQUERY_BASE = 'https://v3-cached.virtualflybrain.org';
+const RESOLVED_ID_PATTERN = /^(?:FB(?:gn|al|ti|co|st|tp|bt|rf)_?\d+|VFB[\w:-]+)$/i;
+const FBCO_ID_PATTERN = /^FBco_?\d+$/i;
+
+function looksLikeResolvedId(value: string): boolean {
+  return RESOLVED_ID_PATTERN.test(value.trim());
+}
+
+function looksLikeFbcoId(value: string): boolean {
+  return FBCO_ID_PATTERN.test(value.trim());
+}
 
 async function handleResolveEntity(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const url = `${VFBQUERY_BASE}/resolve_entity?query=${encodeURIComponent(args.name)}`;
-  console.error(`MCP Debug: resolve_entity name="${args.name}"`);
+  const rawName = args.name.trim();
+
+  if (!rawName) {
+    return {
+      content: [{
+        type: 'text',
+        text: 'Error: resolve_entity expects an unresolved FlyBase-related query string, but the provided name was empty.',
+      }],
+    };
+  }
+
+  if (looksLikeResolvedId(rawName)) {
+    return {
+      content: [{
+        type: 'text',
+        text: `Error: resolve_entity expects unresolved user text such as "P{VT054895-GAL4.DBD}" or "Hb9-GAL4", not a resolved ID like "${rawName}". If you already have a FlyBase feature ID, call find_stocks directly. If you already have a VFB ID, use search_terms, get_term_info, or run_query as appropriate.`,
+      }],
+    };
+  }
+
+  const url = `${VFBQUERY_BASE}/resolve_entity?query=${encodeURIComponent(rawName)}`;
+  console.error(`MCP Debug: resolve_entity name="${rawName}"`);
   try {
     const response = await axios.get(url);
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
-    return { content: [{ type: 'text', text: `Error resolving entity "${args.name}": ${error}` }] };
+    return { content: [{ type: 'text', text: `Error resolving entity "${rawName}": ${error}` }] };
   }
 }
 
@@ -682,13 +712,33 @@ async function handleFindStocks(args: { feature_id: string; collection_filter?: 
 }
 
 async function handleResolveCombination(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const url = `${VFBQUERY_BASE}/resolve_combination?query=${encodeURIComponent(args.name)}`;
-  console.error(`MCP Debug: resolve_combination name="${args.name}"`);
+  const rawName = args.name.trim();
+
+  if (!rawName) {
+    return {
+      content: [{
+        type: 'text',
+        text: 'Error: resolve_combination expects an unresolved split-GAL4 combination name or synonym, but the provided name was empty.',
+      }],
+    };
+  }
+
+  if (looksLikeFbcoId(rawName)) {
+    return {
+      content: [{
+        type: 'text',
+        text: `Error: resolve_combination expects unresolved user text such as "MB002B" or "SS04495", not an FBco ID like "${rawName}". If you already have an FBco ID, call find_combo_publications directly.`,
+      }],
+    };
+  }
+
+  const url = `${VFBQUERY_BASE}/resolve_combination?query=${encodeURIComponent(rawName)}`;
+  console.error(`MCP Debug: resolve_combination name="${rawName}"`);
   try {
     const response = await axios.get(url);
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
-    return { content: [{ type: 'text', text: `Error resolving combination "${args.name}": ${error}` }] };
+    return { content: [{ type: 'text', text: `Error resolving combination "${rawName}": ${error}` }] };
   }
 }
 
@@ -925,9 +975,9 @@ function getHtmlPage(): string {
     <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
     <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
     <li><code>search_terms</code> - Search for VFB terms using the Solr search server with filtering options</li>
-    <li><code>resolve_entity</code> - Resolve a name (e.g., driver line or cell type label) to VFB IDs and metadata</li>
+    <li><code>resolve_entity</code> - Resolve an unresolved query string (e.g., P{VT054895-GAL4.DBD} or a driver line / cell type label) to VFB/FlyBase IDs and metadata</li>
     <li><code>find_stocks</code> - Find fly stocks for a FlyBase feature ID (e.g., driver line, enhancer, or tool line)</li>
-    <li><code>resolve_combination</code> - Resolve a split-GAL4 combination name to its underlying IDs</li>
+    <li><code>resolve_combination</code> - Resolve an unresolved split-GAL4 combination name or synonym to its underlying IDs</li>
     <li><code>find_combo_publications</code> - Find publications associated with a split-GAL4 combination</li>
     <li><code>list_connectome_datasets</code> - List available connectome datasets (e.g., Hemibrain, FAFB)</li>
     <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters</li>

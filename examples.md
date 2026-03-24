@@ -95,7 +95,7 @@ This file contains examples of how to use the VFB3-MCP server tools.
   "params": {
     "name": "resolve_entity",
     "arguments": {
-      "name": "Hb9-GAL4"
+      "name": "P{VT054895-GAL4.DBD}"
     }
   }
 }

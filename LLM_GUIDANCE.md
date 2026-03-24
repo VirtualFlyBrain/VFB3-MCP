@@ -183,6 +183,7 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 **When to use:** User asks about fly stocks, driver lines, GAL4 lines, alleles, insertions, or split-GAL4 combinations and wants to find available stocks or resolve names to IDs.
 
 **Important:** `resolve_entity` queries FlyBase Chado — for VFB ontology lookups (anatomical terms, neuron class IDs) use `search_terms` and `get_term_info` instead.
+**Important:** `resolve_entity` is for unresolved user text only. Pass the raw query string exactly as written (for example `P{VT054895-GAL4.DBD}`); do not pass a resolved FlyBase/VFB ID to `resolve_entity`.
 
 ### Workflow
 
@@ -194,7 +195,7 @@ Available filter types are loaded dynamically from Solr at server startup, so th
    - `FBst\d+` → stock ID (direct to `find_stocks`)
    - Any other string → resolve first with `resolve_entity`
 
-2. **Resolve entity** — If user provides a name (not an ID), call `resolve_entity`. It uses tiered resolution:
+2. **Resolve entity** — If user provides a name (not an ID), call `resolve_entity` with the raw unresolved string exactly as written. It uses tiered resolution:
    - Exact match on feature name
    - Synonym match (case-insensitive)
    - Broad pattern match (ILIKE)
@@ -246,7 +247,7 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 
 1. **Parse input** — Accept FBco IDs (e.g., `FBco0000052`), full combination names, or common synonyms (e.g., "MB002B", "SS04495").
 
-2. **Resolve combination** — If input is not an FBco ID, call `resolve_combination` first. Uses tiered resolution: exact name → synonym → broad pattern match.
+2. **Resolve combination** — If input is not an FBco ID, call `resolve_combination` with the raw unresolved string exactly as written. Uses tiered resolution: exact name → synonym → broad pattern match.
 
 3. **Confirm with user** — **Critical:**
    - If match was via **synonym**, show the resolved formal name and FBco ID, ask user to confirm. Example: *"Your search for 'MB002B' matched **Scer\GAL4[DBD.R14C08]∩Hsap\RELA[AD.R12C11]** (FBco0000052) via synonym. Shall I find publications for this combination?"*
@@ -384,7 +385,7 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 These patterns apply across all the entity resolution and query tools:
 
 ### Tiered Resolution
-All resolve tools (`resolve_entity`, `resolve_combination`) use cascading resolution: exact name → synonym → broad pattern match. Always confirm non-exact matches (SYNONYM/BROAD) with the user before proceeding to further queries.
+All resolve tools (`resolve_entity`, `resolve_combination`) use cascading resolution: exact name → synonym → broad pattern match. These tools expect unresolved user text, not already resolved IDs. Always confirm non-exact matches (SYNONYM/BROAD) with the user before proceeding to further queries.
 
 ### Disambiguation
 When multiple matches are returned by any resolve tool, present a numbered list showing name, ID, and type for each match. Ask the user to pick one before continuing.
