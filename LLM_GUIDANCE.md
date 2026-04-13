@@ -485,9 +485,19 @@ get_hierarchy(id="FBbt_00003686", relationship="subclass_of", direction="both", 
 
 ### Presenting Results
 
-- For descendant trees, present as an indented list showing the hierarchy levels.
-- For ancestors, show as a path: "mushroom body calyx → mushroom body → protocerebrum → CNS → nervous system".
-- Always include the VFB ID alongside the label so users can explore further.
+The response includes:
+- **`display`** — a pre-formatted text tree with large sibling groups shortened. Always present this directly to the user rather than reformatting the JSON.
+- **`display_full`** — the same text tree with no shortening. Use this if the user asks to see all terms.
+
+After showing the text tree, offer the user an interactive HTML version they can open in their browser. Construct the URL using this pattern:
+
+```
+https://v3-cached.virtualflybrain.org/get_hierarchy_html?id=<ID>&relationship=<RELATIONSHIP>&direction=<DIRECTION>&max_depth=<DEPTH>
+```
+
+For example: `https://v3-cached.virtualflybrain.org/get_hierarchy_html?id=FBbt_00003686&relationship=subclass_of&direction=both&max_depth=2`
+
+The HTML page has a collapsible interactive tree with clickable links to VFB for every term.
 
 ---
 
