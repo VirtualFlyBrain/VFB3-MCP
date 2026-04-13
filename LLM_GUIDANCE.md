@@ -445,6 +445,52 @@ Results: 142 connections across 28 upstream neurons → 85 downstream neurons
 
 ---
 
+## Hierarchy Queries
+
+**When to use:** User asks about the structure of a brain region, the types/subtypes of a cell class, or where something fits in the anatomical or cell type hierarchy.
+
+Use the `get_hierarchy` tool.
+
+### Choosing the Parameters
+
+| User asks | `relationship` | `direction` |
+|-----------|---------------|-------------|
+| "What are the parts of the mushroom body?" | `part_of` | `descendants` |
+| "What is the mushroom body part of?" | `part_of` | `ancestors` |
+| "Where does the mushroom body fit in the brain?" | `part_of` | `both` |
+| "What types of Kenyon cell are there?" | `subclass_of` | `descendants` |
+| "What class of neuron is the Kenyon cell?" | `subclass_of` | `ancestors` |
+| "Show me the Kenyon cell hierarchy" | `subclass_of` | `both` |
+
+**Default:** Start with `max_depth=1` (direct parents/children only). If the user wants more detail, increase it. Use `max_depth=-1` with caution — broad terms can have thousands of descendants.
+
+### Result Structure
+
+- **Descendants** are returned as a **nested tree** for both relationship types (children contain their own children).
+- **Ancestors** are returned as a **nested chain** for both relationship types.
+- **`part_of` ancestors** are filtered to nervous system terms only (developmental lineage and generic structural terms are excluded).
+- **`subclass_of` ancestors** are filtered to FBbt cell types only, stopping at "cell" (cross-ontology and non-cell ancestors are excluded).
+
+### Examples
+
+**Brain region structure:**
+```
+get_hierarchy(id="FBbt_00005801", relationship="part_of", direction="both", max_depth=1)
+```
+
+**Cell type hierarchy:**
+```
+get_hierarchy(id="FBbt_00003686", relationship="subclass_of", direction="both", max_depth=2)
+```
+
+### Presenting Results
+
+- For descendant trees, present as an indented list showing the hierarchy levels.
+- For ancestors, show as a path: "mushroom body calyx → mushroom body → protocerebrum → CNS → nervous system".
+- Always include the VFB ID alongside the label so users can explore further.
+
+---
+
 ## Cross-tool Patterns
 
 These patterns apply across all the entity resolution and query tools:
@@ -474,6 +520,7 @@ The typical flow is: **resolve** (get IDs) → **query** (get data) → **presen
 - `search_terms` (find neuron class) → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
 - `search_terms` (validate neuron class) → `query_connectivity` (dual-end class-to-class)
 - `get_term_info` (get VFB ID) → `run_query` with `NeuronNeuronConnectivityQuery`, `NeuronRegionConnectivityQuery`, or `NeuronInputsTo`
+- `search_terms` (find term) → `get_hierarchy` (explore structure or taxonomy)
 
 ## How to Interpret Image Data
 
@@ -617,6 +664,8 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - Connectivity (individual neuron): Search with `filter_types: ["has_neuron_connectivity"]` → `get_term_info` → `run_query` with `NeuronNeuronConnectivityQuery`
 - Connectivity (neuron class): Search with `filter_types: ["neuron", "class"]` → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
 - Connectivity (class-to-class): Search with `filter_types: ["neuron", "class"]` → `query_connectivity` (both upstream and downstream types)
+- Brain region structure: Search with `filter_types: ["anatomy"]` → `get_hierarchy` with `relationship: "part_of"`
+- Cell type hierarchy: Search with `filter_types: ["neuron", "class"]` → `get_hierarchy` with `relationship: "subclass_of"`
 - Datasets: Search with `filter_types: ["dataset"]` to find available datasets
 - Exact term lookup: Use `auto_fetch_term_info: true` for immediate detailed information on exact matches
 - Exclude noise: Always consider `exclude_types: ["deprecated"]` to remove obsolete entities
