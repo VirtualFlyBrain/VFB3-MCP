@@ -281,102 +281,223 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 
 ---
 
-## Connectivity Query Workflow
+## Connectivity Queries
 
-**When to use:** User asks about synaptic connections between neuron types, upstream/downstream partners, or connectivity patterns.
+**When to use:** User asks about synaptic connections, upstream/downstream partners, connectivity patterns, or where a neuron connects.
 
-**DO NOT USE for:**
-- Individual neuron-to-neuron connections (use `run_query` with `NeuronNeuronConnectivityQuery` instead)
-- Connections between muscles and neurons or sense organs and neurons
+**DO NOT USE for:** Connections between muscles and neurons, or sense organs and neurons.
 
-### Choosing the Right Connectivity Tool
+There are **six** connectivity query types. Pick the right one using the decision rules below.
 
-| | `query_connectivity` | `run_query` + `NeuronNeuronConnectivityQuery` |
-|---|---|---|
-| **Scope** | Neuron **class** to neuron **class** | Single **individual** neuron |
-| **Datasets** | Queries across **all** connectome datasets simultaneously | Single dataset (whichever the neuron belongs to) |
-| **Filtering** | Filter at **both** upstream AND downstream ends by class | Shows all partners of one neuron |
-| **Use case** | "What Tm1→T3 connections exist across all datasets?" | "What does neuron VFB_00104glj connect to?" |
-| **Data** | Live comparative connectomics (NOT pre-cached) | Pre-computed per-neuron results (fast) |
-| **Performance** | Can take minutes — use higher weight (≥50 for both-ends) or group_by_class | Fast (pre-computed) |
+### Step 1: Pick the Right Query
 
-### Performance Notes
+**Rule 1 — User has an individual neuron ID (starts with `VFB_`):**
+- To see all synaptic partners of that neuron → use `run_query` with query_type `NeuronNeuronConnectivityQuery`
+- To see which brain regions that neuron connects to → use `run_query` with query_type `NeuronRegionConnectivityQuery`
+- To see presynaptic inputs with neurotransmitter types → use `run_query` with query_type `NeuronInputsTo`
+- If the user specifically asks for a class-level query (e.g. "what classes connect to neurons like this one?"), first call `get_term_info` on the VFB ID to find its neuron class (`FBbt_...` ID), then use that class ID with the queries in Rule 2.
 
-- `query_connectivity` is **not pre-cached** — it runs live queries across all connectome datasets, so responses can take up to several minutes
-- **Both-ends queries** (upstream_type AND downstream_type both set) with low weight thresholds can timeout on large neuron classes — start with `weight ≥ 50`
-- **Single-end queries** (only upstream_type or downstream_type) work well with `weight ≥ 10`
-- Use `group_by_class=true` to get faster aggregated results instead of individual neuron-to-neuron rows
-- Warn the user that connectivity queries may take a while before executing
+**Rule 2 — User has a neuron class (starts with `FBbt_`) or a neuron type name (e.g. "Kenyon cell"):**
+- To see downstream partner classes → use `run_query` with query_type `DownstreamClassConnectivity` (fast, pre-indexed)
+- To see upstream partner classes → use `run_query` with query_type `UpstreamClassConnectivity` (fast, pre-indexed)
+- To see region connectivity or neurotransmitter inputs for a neuron class → use the instance batch workflow described below
+- To filter by **both** upstream AND downstream class at the same time, or to retrieve results that include data from multiple connectome datasets → use `query_connectivity` (slow, live query)
 
-### Workflow
+**Instance batch workflow — running individual neuron queries at the class level:**
 
-1. **Parse input** — Extract parameters using this inference table:
+Some queries (`NeuronRegionConnectivityQuery`, `NeuronInputsTo`) only work on individual neurons, not classes. To use them for a whole neuron class:
 
-   | User says | Mode |
-   |-----------|------|
-   | "upstream of X", "inputs to X", "presynaptic to X" | set `downstream_type` = X |
-   | "downstream of X", "outputs from X", "postsynaptic to X" | set `upstream_type` = X |
-   | "between X and Y", "X to Y connections" | set both `upstream_type` = X, `downstream_type` = Y |
-   | "all connections from X" | set `upstream_type` = X only |
-   | "summarise by class", "aggregated" | set `group_by_class` = true |
+1. Get instances of the class: `run_query(id="FBbt_00003686", query_type="ListAllAvailableImages")`
+2. Extract the VFB IDs from the results.
+3. If there are many instances, tell the user how many there are and ask whether to query all of them or a subset.
+4. Batch-query the instances: `run_query(id=["VFB_xxx", "VFB_yyy", ...], query_type="NeuronRegionConnectivityQuery")`
 
-   **Defaults:** `weight` = 5, `exclude_dbs` = ["hb", "fafb"] (unless user specifies otherwise)
+The `run_query` tool accepts an array of IDs and runs the query on all of them in parallel. Results are returned as a JSON object keyed by `"ID::query_type"`.
 
-2. **Confirm parameters** — Unless user explicitly specified all parameters, show planned query and ask to confirm:
+**Rule 3 — User asks about a brain region (e.g. "What connects to the lobula?"):**
+- First use `search_terms` with `filter_types: ["neuron", "class"]` to find neuron classes in that region.
+- Then apply Rule 2 for the neuron classes found.
+
+**If unsure**, start with the `run_query` options listed in Rules 1–2. They are fast and cached. Only use `query_connectivity` when dual-end class filtering is specifically needed.
+
+### Summary Table
+
+| Query | Input | What it returns | Speed |
+|-------|-------|----------------|-------|
+| `NeuronNeuronConnectivityQuery` | Individual neuron VFB ID | All partner neurons with input/output weights | Fast (cached) |
+| `NeuronRegionConnectivityQuery` | Individual neuron VFB ID | Brain regions with pre/postsynaptic terminal counts | Fast (cached) |
+| `NeuronInputsTo` | Individual neuron VFB ID | Presynaptic partners with neurotransmitter types and weights | Fast (cached) |
+| `DownstreamClassConnectivity` | Neuron class FBbt ID | Downstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
+| `UpstreamClassConnectivity` | Neuron class FBbt ID | Upstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
+| `query_connectivity` | Neuron class names or FBbt IDs | Connections between two neuron classes (includes data from all datasets) | Slow (1–5 min, live) |
+
+### Step 2: Run the Query
+
+#### For `run_query` connectivity queries (fast path)
+
+1. Get the VFB ID or FBbt ID. If the user gave a name, use `search_terms` to find the ID first.
+2. Call `get_term_info` on the ID. Check that the relevant query_type appears in the `Queries` array. If it does not, either the entity does not support that query type, or there are no results for it.
+3. Call `run_query` with the ID and query_type.
+
+**Example — individual neuron partners:**
+```
+run_query(id="VFB_00104glj", query_type="NeuronNeuronConnectivityQuery")
+```
+
+**Example — class downstream partners:**
+```
+run_query(id="FBbt_00003686", query_type="DownstreamClassConnectivity")
+```
+
+**Example — neuron region connectivity:**
+```
+run_query(id="VFB_00104glj", query_type="NeuronRegionConnectivityQuery")
+```
+
+**Example — neuron inputs with neurotransmitter types:**
+```
+run_query(id="VFB_00104glj", query_type="NeuronInputsTo")
+```
+
+#### For `query_connectivity` (slow path — dual-end class-to-class)
+
+1. **Check if you really need `query_connectivity`.** If the user asks about only one direction (e.g. "what is downstream of X?" or "what are the inputs to X?"), use `DownstreamClassConnectivity` or `UpstreamClassConnectivity` via `run_query` instead — they are much faster. Only use `query_connectivity` when the user specifies **both** upstream and downstream types.
+
+2. **Parse the user's request** using this table:
+
+   | User says | Action |
+   |-----------|--------|
+   | "upstream of X", "inputs to X", "presynaptic to X" | Use `run_query` with `UpstreamClassConnectivity` on X. |
+   | "downstream of X", "outputs from X", "postsynaptic to X" | Use `run_query` with `DownstreamClassConnectivity` on X. |
+   | "between X and Y", "X to Y connections" | Use `query_connectivity` with `upstream_type` = X, `downstream_type` = Y |
+   | "summarise by class", "aggregated" | Use `query_connectivity` with `group_by_class` = true (this option is specific to `query_connectivity`) |
+
+   **Defaults for `query_connectivity`:** `weight` = 5, `exclude_dbs` = ["hb", "fafb"]
+
+3. **Validate neuron type names.** Use `search_terms` with `filter_types: ["neuron", "class"]` to check the name is correct. If ambiguous, show candidates and ask user to pick.
+
+4. **Confirm parameters with the user before running.** This query is slow. Show:
    ```
    I'll query connectivity with these parameters:
    - Upstream type:   transmedullary neuron Tm1
-   - Downstream type: (any)
+   - Downstream type: T3 neuron
    - Min. weight:     5
    - Excluded DBs:    hb, fafb
    - Group by class:  No
-   Shall I proceed, or would you like to change any of these?
+   This query may take several minutes. Shall I proceed?
    ```
 
-3. **Validate neuron type names** — Use `search_terms` with `filter_types: ["neuron", "class"]` to validate/canonicalize labels. Skip if label is already clearly canonical (e.g., "GABAergic neuron"). If ambiguous or multiple candidates, show disambiguation list and ask user.
+5. **Execute** — Call `query_connectivity` with confirmed parameters.
 
-   > **Tip:** If user asks about a brain region (e.g., "What connects to the lobula?"), first find neuron classes in that region using `search_terms`, then query connectivity for those specific classes.
+**Performance rules for `query_connectivity`:**
+- Always start with the default `weight = 5`. There is no universal "good" weight — it varies by cell type.
+- Single-end queries (only upstream or only downstream set) are **slower** than both-ends queries because they return more results. If the user only cares about one direction, prefer `DownstreamClassConnectivity` or `UpstreamClassConnectivity` via `run_query` instead — they are pre-indexed and fast.
+- Use `group_by_class=true` for faster aggregated results.
+- Only use `query_connectivity` when you need both ends filtered by class.
 
-   > **Tip:** If you have a VFB neuron ID (e.g., `VFB_...`), run `get_term_info` on it and look for the `FBbt_...` class identifier; use that as `upstream_type`/`downstream_type`.
+### Step 3: Present Results
 
-4. **Execute query** — Call `query_connectivity` with confirmed parameters.
+**Always start with a query summary:**
+```
+Query: NeuronNeuronConnectivityQuery for VFB_00104glj
+Results: 42 partner neurons (23 upstream, 19 downstream)
+```
 
-5. **Handle results:**
+Or for `query_connectivity`:
+```
+Query:
+- Upstream type:   transmedullary neuron Tm1 (FBbt_00003789)
+- Downstream type: T3 neuron (FBbt_00047727)
+- Min. weight:     5
+- Excluded DBs:    hb, fafb
+Results: 142 connections across 28 upstream neurons → 85 downstream neurons
+```
 
-   **Per-neuron mode** (`group_by_class=false`):
-   - Columns: upstream_class, upstream_neuron_id, upstream_neuron_name, weight, downstream_neuron_id, downstream_neuron_name, downstream_class, data_source, accession
-   - **>50 rows:** Show total connection count, top 20 sorted by weight descending, summary stats (unique upstream neurons, unique downstream neurons, weight range)
-   - **≤50 rows:** Show full table
+**Result formatting:**
+- **≤50 rows:** Show full table.
+- **>50 rows:** Show top 20 sorted by weight descending. Include summary stats (total connections, unique partners, weight range). Note that results are truncated.
 
-   **Class mode** (`group_by_class=true`):
-   - Columns: upstream_class, downstream_class, total_upstream_count, connected_upstream_count, percent_connected, pairwise_connections, total_weight, average_weight
-   - Present ranked by `pairwise_connections` descending
+**Column guide by query type:**
 
-   **Zero results — relaxation loop:**
-   1. Lower weight to 1 → report count
-   2. Remove exclude_dbs (include all datasets) → report count
-   3. Try `group_by_class=true` → report count
-   4. Show user what was tried and let them decide which relaxation to apply
+| Query type | Key columns |
+|------------|------------|
+| `NeuronNeuronConnectivityQuery` | partner label, outputs (synapses out), inputs (synapses in), tags |
+| `NeuronRegionConnectivityQuery` | region, presynaptic terminals, postsynaptic terminals |
+| `NeuronInputsTo` | presynaptic neuron name, neurotransmitter type, weight, neuron type |
+| `DownstreamClassConnectivity` | downstream class, total N, connected N, % connected, avg weight |
+| `UpstreamClassConnectivity` | upstream class, total N, connected N, % connected, avg weight |
+| `query_connectivity` (per-neuron) | upstream class, upstream neuron, weight, downstream neuron, downstream class, data source |
+| `query_connectivity` (grouped) | upstream class, downstream class, % connected, pairwise connections, avg weight |
 
-   **Error:** Confirm neuron types with user, suggest using `search_terms` to find correct terms, retry.
+**Zero results from `query_connectivity` — try these relaxation steps in order:**
+1. Lower weight to 1.
+2. Set `exclude_dbs` to `[]` to include all datasets.
+3. Try `group_by_class=true`.
+4. Tell the user what was tried and let them decide.
 
-6. **Output format** — Always include a resolved terms block:
-   ```
-   Query:
-   - Upstream type:   transmedullary neuron Tm1 (FBbt_00003789)
-   - Downstream type: (any)
-   - Min. weight:     5
-   - Excluded DBs:    hb, fafb
-   - Group by class:  No
+### Step 4: Follow-up Offers
 
-   Results: 142 connections across 28 upstream neurons → 85 downstream neurons
-   ```
+- "To see full details on any neuron, I can look it up in VFB."
+- "To see which brain regions this neuron connects to, I can run a region connectivity query."
+- "To find what connects *back* to this type, I can swap upstream/downstream."
+- "To aggregate by neuron class, I can re-run with group_by_class=true."
+- "You can view any neuron at `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
 
-7. **Follow-up offers:**
-   - "To get full details on any neuron, I can look it up in VFB using its ID"
-   - "To find what connects *back* to [type], I can swap upstream/downstream and re-run"
-   - "To aggregate these results by neuron class, I can re-run with group_by_class=true"
-   - "You can view any neuron at `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={short_form}`"
+---
+
+## Hierarchy Queries
+
+**When to use:** User asks about the structure of a brain region, the types/subtypes of a cell class, or where something fits in the anatomical or cell type hierarchy.
+
+Use the `get_hierarchy` tool.
+
+### Choosing the Parameters
+
+| User asks | `relationship` | `direction` |
+|-----------|---------------|-------------|
+| "What are the parts of the mushroom body?" | `part_of` | `descendants` |
+| "What is the mushroom body part of?" | `part_of` | `ancestors` |
+| "Where does the mushroom body fit in the brain?" | `part_of` | `both` |
+| "What types of Kenyon cell are there?" | `subclass_of` | `descendants` |
+| "What class of neuron is the Kenyon cell?" | `subclass_of` | `ancestors` |
+| "Show me the Kenyon cell hierarchy" | `subclass_of` | `both` |
+
+**Default:** Start with `max_depth=1` (direct parents/children only). If the user wants more detail, increase it. Use `max_depth=-1` with caution — broad terms can have thousands of descendants.
+
+### Result Structure
+
+- **Descendants** are returned as a **nested tree** for both relationship types (children contain their own children).
+- **Ancestors** are returned as a **nested chain** for both relationship types.
+- **`part_of` ancestors** are filtered to nervous system terms only (developmental lineage and generic structural terms are excluded).
+- **`subclass_of` ancestors** are filtered to FBbt cell types only, stopping at "cell" (cross-ontology and non-cell ancestors are excluded).
+
+### Examples
+
+**Brain region structure:**
+```
+get_hierarchy(id="FBbt_00005801", relationship="part_of", direction="both", max_depth=1)
+```
+
+**Cell type hierarchy:**
+```
+get_hierarchy(id="FBbt_00003686", relationship="subclass_of", direction="both", max_depth=2)
+```
+
+### Presenting Results
+
+The response includes:
+- **`display`** — a pre-formatted text tree with large sibling groups shortened. Always present this directly to the user rather than reformatting the JSON.
+- **`display_full`** — the same text tree with no shortening. Use this if the user asks to see all terms.
+
+After showing the text tree, offer the user an interactive HTML version they can open in their browser. Construct the URL using this pattern:
+
+```
+https://v3-cached.virtualflybrain.org/get_hierarchy_html?id=<ID>&relationship=<RELATIONSHIP>&direction=<DIRECTION>&max_depth=<DEPTH>
+```
+
+For example: `https://v3-cached.virtualflybrain.org/get_hierarchy_html?id=FBbt_00003686&relationship=subclass_of&direction=both&max_depth=2`
+
+The HTML page has a collapsible interactive tree with clickable links to VFB for every term.
 
 ---
 
@@ -406,7 +527,10 @@ Always provide appropriate links in results:
 The typical flow is: **resolve** (get IDs) → **query** (get data) → **present** (format for user):
 - `resolve_entity` → `find_stocks`
 - `resolve_combination` → `find_combo_publications`
-- `search_terms` (validate neuron class) → `query_connectivity`
+- `search_terms` (find neuron class) → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
+- `search_terms` (validate neuron class) → `query_connectivity` (dual-end class-to-class)
+- `get_term_info` (get VFB ID) → `run_query` with `NeuronNeuronConnectivityQuery`, `NeuronRegionConnectivityQuery`, or `NeuronInputsTo`
+- `search_terms` (find term) → `get_hierarchy` (explore structure or taxonomy)
 
 ## How to Interpret Image Data
 
@@ -547,7 +671,11 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - Neuron morphology: Search for neuron type with `filter_types: ["neuron"]` → get_term_info → check for SimilarMorphology
 - Adult neurons with images: Search with `filter_types: ["neuron", "adult", "has_image"]`, `minimize_results: true`
 - Brain regions: Search for anatomical terms with `filter_types: ["anatomy"]` → explore hierarchical relationships
-- Connectivity: Search with `filter_types: ["has_neuron_connectivity"]` → run Connectivity queries
+- Connectivity (individual neuron): Search with `filter_types: ["has_neuron_connectivity"]` → `get_term_info` → `run_query` with `NeuronNeuronConnectivityQuery`
+- Connectivity (neuron class): Search with `filter_types: ["neuron", "class"]` → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
+- Connectivity (class-to-class): Search with `filter_types: ["neuron", "class"]` → `query_connectivity` (both upstream and downstream types)
+- Brain region structure: Search with `filter_types: ["anatomy"]` → `get_hierarchy` with `relationship: "part_of"`
+- Cell type hierarchy: Search with `filter_types: ["neuron", "class"]` → `get_hierarchy` with `relationship: "subclass_of"`
 - Datasets: Search with `filter_types: ["dataset"]` to find available datasets
 - Exact term lookup: Use `auto_fetch_term_info: true` for immediate detailed information on exact matches
 - Exclude noise: Always consider `exclude_types: ["deprecated"]` to remove obsolete entities

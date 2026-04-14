@@ -314,6 +314,36 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
             },
           },
         },
+        {
+          name: 'get_hierarchy',
+          description: 'Build a hierarchy tree for a VFB term, showing ancestors (parents) and/or descendants (children). Use relationship "part_of" for brain region structure (e.g. "what are the parts of the mushroom body?") and "subclass_of" for cell type hierarchies (e.g. "what types of Kenyon cell are there?"). Descendants are returned as a nested tree for both relationship types. Ancestors are returned as a nested chain, filtered to nervous system terms for part_of. Start with max_depth=1 for direct parents/children, and offer to go deeper if the user wants more detail.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'VFB term ID (e.g. FBbt_00005801 for mushroom body, FBbt_00003686 for Kenyon cell)',
+              },
+              relationship: {
+                type: 'string',
+                enum: ['part_of', 'subclass_of'],
+                description: 'Type of hierarchy: "part_of" for brain region structure, "subclass_of" for cell type taxonomies',
+              },
+              direction: {
+                type: 'string',
+                enum: ['descendants', 'ancestors', 'both'],
+                description: 'Which direction to explore (default: "both")',
+                default: 'both',
+              },
+              max_depth: {
+                type: 'number',
+                description: 'Number of levels to expand. 1 = direct children/parents only. Higher values go deeper. -1 = full tree (use with caution on broad terms). Default: 1.',
+                default: 1,
+              },
+            },
+            required: ['id', 'relationship'],
+          },
+        },
       ],
     };
   });
@@ -350,6 +380,8 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           return await handleListConnectomeDatasets();
         case 'query_connectivity':
           return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[] });
+        case 'get_hierarchy':
+          return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number });
         default:
           console.error('MCP Debug: Unknown tool requested:', name);
           throw new McpError(
@@ -784,6 +816,27 @@ async function handleQueryConnectivity(args: {
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
     return { content: [{ type: 'text', text: `Error querying connectivity: ${error}` }] };
+  }
+}
+
+async function handleGetHierarchy(args: {
+  id: string;
+  relationship: string;
+  direction?: string;
+  max_depth?: number;
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const params = new URLSearchParams();
+  params.set('id', args.id);
+  params.set('relationship', args.relationship);
+  if (args.direction) params.set('direction', args.direction);
+  if (args.max_depth !== undefined) params.set('max_depth', String(args.max_depth));
+  const url = `${VFBQUERY_BASE}/get_hierarchy?${params.toString()}`;
+  console.error(`MCP Debug: get_hierarchy params=${params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 120000 }); // 2 min
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    return { content: [{ type: 'text', text: `Error getting hierarchy: ${error}` }] };
   }
 }
 
