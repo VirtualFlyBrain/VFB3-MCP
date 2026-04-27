@@ -1,5 +1,79 @@
 # VFB3-MCP: Comprehensive LLM Guidance
 
+## ⚠️ READ THIS FIRST — Three Rules
+
+These three rules apply to every VFB question. Re-read them whenever a tool call returns empty or unexpected results.
+
+### Rule 1 — Discover queries before running them
+
+For any VFB or anatomy ontology ID (`VFB_*`, `FBbt_*`), the workflow is **always**:
+
+1. **`search_terms`** — find the ID (skip if the user already provided one).
+2. **`get_term_info`** — read the `Queries` array. This lists the valid `query_type` values for this entity.
+3. **`run_query`** — pass `id` and a `query_type` taken from that `Queries` array.
+
+DO NOT call `run_query` with a guessed `query_type`. If a `query_type` is not in the entity's `Queries` array, that query is not available for that entity, and `run_query` will return an error.
+
+### Rule 2 — Empty results ≠ no data exists
+
+If `run_query` returns empty rows or an error:
+
+- The `query_type` may not be supported for this entity → re-check the `Queries` array from `get_term_info`.
+- The entity may have no data for that specific question → try a different `query_type` from the same `Queries` array, or try a related entity (e.g. its parent class via `get_hierarchy`).
+- It does **NOT** mean the answer is unknown to science. It means this MCP call did not return it.
+
+If `search_terms` returns no good matches:
+
+- Try alternative spellings, synonyms, or a broader term.
+- Try with different `filter_types` (see the cookbook below).
+
+### Rule 3 — Never substitute training knowledge for missing data
+
+If the MCP cannot answer, tell the user clearly:
+
+> "VFB does not return data for X via [tool]. I tried [list of attempts]. You could try [alternative search strategy]."
+
+DO NOT fabricate any of the following from training data:
+
+- FlyBase IDs (`FBgn`, `FBal`, `FBti`, `FBco`, `FBst`, `FBrf`)
+- Anatomy ontology IDs (`FBbt_*`)
+- VFB IDs (`VFB_*`)
+- Driver line names, allele names, or split-GAL4 combination names
+- Paper citations, DOIs, or PMIDs
+- Connectivity counts, synapse weights, or expression results
+
+Naming a real ID that you have not seen in a tool result this conversation counts as fabrication. If in doubt, say so and ask the user how they would like to proceed.
+
+---
+
+## Search Filter Cookbook
+
+Unfiltered `search_terms` calls return deprecated terms, scRNAseq artifacts, and unrelated entity types mixed in with what the user wants. Use `filter_types` from the start. Common recipes:
+
+| User asks about | `filter_types` | `exclude_types` |
+|---|---|---|
+| Neuron types/classes | `["neuron", "class"]` | `["deprecated"]` |
+| Individual neurons (with images) | `["neuron", "has_image"]` | `["deprecated"]` |
+| Neurons with connectome data | `["neuron", "has_neuron_connectivity"]` | `["deprecated"]` |
+| Brain regions / neuropils | `["anatomy"]` | `["deprecated"]` |
+| Genes | `["gene"]` | `["deprecated"]` |
+| Expression patterns / driver lines | `["expression_pattern"]` | `["deprecated"]` |
+| Datasets | `["dataset"]` | — |
+
+**Stage filtering — only when the user is specific.** VFB covers adult, larval, and embryonic data, and many anatomical FBbt terms are stage-agnostic (the "antennal lobe" class covers all life stages). Do NOT add `"adult"` by default — you will hide the generic class and any larval/embryonic results.
+
+- Add `"adult"` to `filter_types` only if the user explicitly asks about the adult fly (e.g. "adult Kenyon cells", "in the adult brain").
+- Add `"larva"` if the user asks about larval anatomy.
+- If the user does not specify a stage, leave stage filters out and let the user pick from the results.
+
+Other useful options on `search_terms`:
+
+- `boost_types: ["has_image", "has_neuron_connectivity"]` — soft-ranks the most data-rich entities first without excluding others.
+- `minimize_results: true` — limits to top 10 and adds truncation metadata. Use for exploratory searches to avoid filling context with irrelevant matches.
+- `auto_fetch_term_info: true` — when an exact label match is found, folds `get_term_info` into the same response, saving a round trip.
+
+---
+
 ## When to Use This MCP Server
 
 The VirtualFlyBrain (VFB) MCP server should be used when users ask questions related to:
@@ -524,13 +598,20 @@ Always provide appropriate links in results:
 - If connectivity query returns error about unrecognized type, use `search_terms` to find the correct neuron class term
 
 ### Tool Chaining
-The typical flow is: **resolve** (get IDs) → **query** (get data) → **present** (format for user):
+
+The core chain (see Rule 1 at the top) is **search → discover → query**:
+
+`search_terms` → `get_term_info` (read the `Queries` array) → `run_query` (with a `query_type` from that array).
+
+Specific patterns:
 - `resolve_entity` → `find_stocks`
 - `resolve_combination` → `find_combo_publications`
-- `search_terms` (find neuron class) → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
+- `search_terms` (find neuron class) → `get_term_info` → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
 - `search_terms` (validate neuron class) → `query_connectivity` (dual-end class-to-class)
-- `get_term_info` (get VFB ID) → `run_query` with `NeuronNeuronConnectivityQuery`, `NeuronRegionConnectivityQuery`, or `NeuronInputsTo`
+- `search_terms` → `get_term_info` (get VFB ID) → `run_query` with `NeuronNeuronConnectivityQuery`, `NeuronRegionConnectivityQuery`, or `NeuronInputsTo`
 - `search_terms` (find term) → `get_hierarchy` (explore structure or taxonomy)
+
+If a chain step returns empty or an error, do not stop — try a different `query_type` from the `Queries` array, or a related entity. See Rule 2.
 
 ## How to Interpret Image Data
 
@@ -654,7 +735,7 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - **Confidence Values**: Many datasets include confidence scores
 - **Publication References**: Peer-reviewed sources
 - **Multiple Imaging Modalities**: Cross-validation across techniques
-- **Standard Ontologies**: Consistent terminology using FlyBase ontologies
+- **Standard Ontologies**: Consistent terminology using the Drosophila anatomy ontology (FBbt) and related ontologies
 
 ## Best Practices for LLM Usage
 
@@ -669,7 +750,7 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 ### **Common Query Patterns**
 - Gene expression: Search for gene name with `filter_types: ["gene"]` → get_term_info → run PaintedDomains query
 - Neuron morphology: Search for neuron type with `filter_types: ["neuron"]` → get_term_info → check for SimilarMorphology
-- Adult neurons with images: Search with `filter_types: ["neuron", "adult", "has_image"]`, `minimize_results: true`
+- Neurons with images: Search with `filter_types: ["neuron", "has_image"]`, `minimize_results: true` (add `"adult"` or `"larva"` only if the user specified a stage)
 - Brain regions: Search for anatomical terms with `filter_types: ["anatomy"]` → explore hierarchical relationships
 - Connectivity (individual neuron): Search with `filter_types: ["has_neuron_connectivity"]` → `get_term_info` → `run_query` with `NeuronNeuronConnectivityQuery`
 - Connectivity (neuron class): Search with `filter_types: ["neuron", "class"]` → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
@@ -681,9 +762,13 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - Exclude noise: Always consider `exclude_types: ["deprecated"]` to remove obsolete entities
 
 ### **Error Handling**
-- If search returns no results, try alternative spellings or broader terms
-- If query fails, check if the entity supports that query type (via Tags)
-- Network timeouts are common - suggest retrying or using cached results
+
+See also: Rules 2 and 3 at the top of this document.
+
+- If `search_terms` returns no good matches, try alternative spellings, synonyms, broader terms, or different `filter_types` from the cookbook.
+- If `run_query` fails or returns empty, call `get_term_info` on the ID and pick a different `query_type` from the `Queries` array. The error message will list the valid query_types — use them.
+- If no MCP call answers the question, tell the user clearly what you tried and what you found. Do **not** fall back to training-data answers (no fabricated FBbt/FBgn/FBst IDs, driver names, citations, or numbers).
+- Network timeouts: suggest retrying. `query_connectivity` is the only slow tool — others should respond in seconds.
 
 ## Gemini Integration
 
