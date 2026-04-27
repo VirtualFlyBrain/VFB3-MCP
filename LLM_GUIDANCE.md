@@ -20,7 +20,13 @@ DO NOT call `run_query` with a guessed `query_type`. If a `query_type` is not in
 - `label` — short human description.
 - `default_args` — arguments ready to copy into the tool call.
 
-Currently `get_term_info` surfaces `get_hierarchy` here for cell-type classes (`subclass_of`) and nervous-system regions (`part_of`). Call the named tool directly with `default_args` — do not pass these via `run_query`.
+Currently `get_term_info` surfaces:
+
+- `get_hierarchy` — for cell-type classes (`subclass_of`) and nervous-system regions (`part_of`).
+- `find_stocks` — for FlyBase feature IDs (FBgn, FBal, FBti, FBtp, FBco, FBst). Use this rather than `run_query`/`FindStocks` when you need the `collection_filter` argument (Bloomington, Kyoto, VDRC, etc.).
+- `find_combo_publications` — for FBco split-GAL4 combinations. Use this rather than `run_query`/`FindComboPublications` when you need full citation metadata (DOI, PMID, miniref, year) for paper rendering.
+
+Call the named tool directly with `default_args` — do not pass these values via `run_query`.
 
 ### Rule 2 — Empty results ≠ no data exists
 
