@@ -119,7 +119,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
       tools: [
         {
           name: 'get_term_info',
-          description: 'Get term information from VirtualFlyBrain using one or more VFB IDs. Supports batch requests — pass an array of IDs to fetch multiple terms in parallel. When multiple IDs are provided, results are returned as a JSON object keyed by ID. The Images field is keyed by template brain ID — use these to construct VFB browser URLs: https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<VFB_ID>&i=<TEMPLATE_ID>,<IMAGE_ID1>,<IMAGE_ID2> where id= is the focus term and i= is a comma-separated list of image IDs for the 3D viewer (template ID must be first in the i= list to set the coordinate space).',
+          description: 'Get term info for a VFB or anatomy ontology entity (VFB_*, FBbt_*, etc.). THIS IS THE QUERY DISCOVERY TOOL: the response\'s "Queries" array lists the valid query_type values that run_query accepts for this entity. ALWAYS call get_term_info before run_query unless you already obtained the query_type from a previous get_term_info call in this conversation. Returns: SuperTypes (classification), Tags (data flags like has_image, has_neuron_connectivity), Queries (valid query_types for run_query), RelatedTools (other MCP tools applicable to this entity, with default_args ready to copy — e.g. get_hierarchy with subclass_of for cell types or part_of for nervous-system regions), Images (keyed by template brain ID), Publications, Synonyms. Supports batch — pass an array of IDs to fetch in parallel; batch results are returned as a JSON object keyed by ID. To build VFB browser URLs from the Images field: https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<VFB_ID>&i=<TEMPLATE_ID>,<IMAGE_ID1>,<IMAGE_ID2> — id= sets the focus term and i= lists images for the 3D viewer (template ID must be first in i= to set the coordinate space).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -136,7 +136,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'run_query',
-          description: 'Run a query on VirtualFlyBrain using a VFB ID and query type. Supports batch requests — pass an array of IDs to run the same query_type on all of them, or use the queries array for mixed ID/query_type combinations. When multiple queries are provided, results are returned as a JSON object keyed by "ID::query_type". IMPORTANT: Do NOT pass tool names (like "get_term_info" or "search_terms") as query_type — those are separate tools. Valid query_types are returned by get_term_info in the Queries array for each entity. Common query_types include: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (for templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery (for neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere (for classes). Available query_types vary by entity type — ALWAYS call get_term_info FIRST to see which queries are available for a given ID, as attempting invalid query types will result in an error message directing you to use get_term_info.',
+          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type".',
           inputSchema: {
             type: 'object',
             properties: {
@@ -168,7 +168,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'search_terms',
-          description: 'Search for VFB terms using the Solr search server. Results can be filtered, excluded, or boosted by entity type using facets_annotation values.\n\nAvailable filter types: entity, anatomy, nervous_system, individual, has_image, adult, cell, neuron, vfb, has_neuron_connectivity, nblast, visual_system, cholinergic, class, secondary_neuron, expression_pattern, gabaergic, expression_pattern_fragment, glutamatergic, feature, sensory_neuron, neuronbridge, deprecated, larva, has_region_connectivity, nblastexp, gene, primary_neuron, flycircuit, mechanosensory_system, histaminergic, lineage_mbp, peptidergic, hasscrnaseq, chemosensory_system, split, has_subclass, olfactory_system, dopaminergic, fafb, l1em, pub, enzyme, motor_neuron, cluster, lineage_6, lineage_3, serotonergic, lineage_19, lineage_cm3, lineage_dm6, proprioceptive_system, gustatory_system, sense_organ, lineage_mbp4, lineage_mbp1, lineage_1, lineage_mbp2, lineage_all1, lineage_balc, lineage_cm4, lineage_dm4, muscle, lineage_13, lineage_8, lineage_mbp3, lineage_12, lineage_dm1, lineage_dpmm1, lineage_9, lineage_cp2, lineage_dl1, fanc, lineage_7, lineage_vpnd2, lineage_dm3, lineage_dpmpm2, lineage_14, lineage_4, lineage_blp1, lineage_dalv2, lineage_eba1, lineage_dm2, lineage_dpmpm1, auditory_system, lineage_16, lineage_blvp1, lineage_blav2, lineage_vlpl2, lineage_alad1, lineage_bamv3, lineage_bld6, lineage_vpnd1, synaptic_neuropil, lineage_23, lineage_17, lineage_10, lineage_dplpv, lineage_21, lineage_alv1\n\nMultiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types soft-rank matching results higher without excluding others.',
+          description: 'Search VFB terms (Solr). USE filter_types BY DEFAULT — unfiltered searches return deprecated terms, scRNAseq artifacts, and developmental stages mixed in with the entity the user wants.\n\nCommon filter_types recipes:\n- Neuron classes: ["neuron", "class"]\n- Individual neurons with images: ["neuron", "has_image"]\n- Neurons with connectome data: ["neuron", "has_neuron_connectivity"]\n- Brain regions / neuropils: ["anatomy"]\n- Genes: ["gene"]\n- Driver lines / expression patterns: ["expression_pattern"]\n- Datasets: ["dataset"]\nAdd exclude_types: ["deprecated"] to almost any search to remove obsolete entities.\n\nStage filtering: VFB covers adult, larval, and embryonic data, and many anatomical FBbt classes are stage-agnostic. Do NOT add "adult" or "larva" to filter_types by default — only add them when the user is explicit about a stage (e.g. "adult Kenyon cells", "larval mushroom body"). Default searches should leave stage out so stage-agnostic classes and all life stages are visible.\n\nUseful flags:\n- minimize_results=true → top 10 + truncation metadata, for exploratory searches.\n- auto_fetch_term_info=true → if an exact label match is found, returns get_term_info in the same response.\n- boost_types=["has_image", "has_neuron_connectivity"] → soft-rank data-rich entities first without excluding others.\n\nIf the search returns no good matches, do NOT fall back to training-data answers — try alternative spellings, synonyms, broader terms, or different filter_types.\n\nMultiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types soft-rank without excluding.\n\nAvailable filter types: entity, anatomy, nervous_system, individual, has_image, adult, cell, neuron, vfb, has_neuron_connectivity, nblast, visual_system, cholinergic, class, secondary_neuron, expression_pattern, gabaergic, expression_pattern_fragment, glutamatergic, feature, sensory_neuron, neuronbridge, deprecated, larva, has_region_connectivity, nblastexp, gene, primary_neuron, flycircuit, mechanosensory_system, histaminergic, lineage_mbp, peptidergic, hasscrnaseq, chemosensory_system, split, has_subclass, olfactory_system, dopaminergic, fafb, l1em, pub, enzyme, motor_neuron, cluster, lineage_6, lineage_3, serotonergic, lineage_19, lineage_cm3, lineage_dm6, proprioceptive_system, gustatory_system, sense_organ, lineage_mbp4, lineage_mbp1, lineage_1, lineage_mbp2, lineage_all1, lineage_balc, lineage_cm4, lineage_dm4, muscle, lineage_13, lineage_8, lineage_mbp3, lineage_12, lineage_dm1, lineage_dpmm1, lineage_9, lineage_cp2, lineage_dl1, fanc, lineage_7, lineage_vpnd2, lineage_dm3, lineage_dpmpm2, lineage_14, lineage_4, lineage_blp1, lineage_dalv2, lineage_eba1, lineage_dm2, lineage_dpmpm1, auditory_system, lineage_16, lineage_blvp1, lineage_blav2, lineage_vlpl2, lineage_alad1, lineage_bamv3, lineage_bld6, lineage_vpnd1, synaptic_neuropil, lineage_23, lineage_17, lineage_10, lineage_dplpv, lineage_21, lineage_alv1\n\nMultiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types soft-rank matching results higher without excluding others.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -454,6 +454,35 @@ async function handleGetTermInfo(args: { id: string | string[] }) {
   };
 }
 
+/**
+ * Fetch the available query_types for an ID by calling get_term_info and
+ * extracting its "Queries" array. Used to enrich run_query error messages so
+ * the LLM sees the valid options without an extra round trip.
+ *
+ * Returns null on any failure — callers should fall back to a generic message.
+ */
+async function fetchAvailableQueryTypes(id: string): Promise<string[] | null> {
+  try {
+    const result = await fetchSingleTermInfo(id);
+    if (!result.data) return null;
+    const queries = result.data.Queries;
+    if (Array.isArray(queries)) return queries;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function formatAvailableQueriesHint(id: string, queries: string[] | null): string {
+  if (queries && queries.length > 0) {
+    return `\n\nAvailable query_types for "${id}" (from get_term_info Queries array): ${JSON.stringify(queries)}\nPick one of these for run_query, or call get_term_info("${id}") for full details.`;
+  }
+  if (queries && queries.length === 0) {
+    return `\n\nget_term_info("${id}") reports no available queries for this entity. The ID may be deprecated, the entity may not support pre-computed queries, or you may need to query a related entity (e.g. its parent class via get_hierarchy).`;
+  }
+  return `\n\nCould not retrieve the Queries array for "${id}". Call get_term_info("${id}") to verify the ID exists and to see its available query_types.`;
+}
+
 async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?: any; error?: string; redirect?: string }> {
   // If the LLM accidentally passes a tool name as query_type, redirect
   if (query_type === 'get_term_info') {
@@ -469,11 +498,17 @@ async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?
     const response = await axios.get(url);
     if (response.data === null || response.data === undefined) {
       console.error(`MCP Debug: No results for query id=${id} query_type=${query_type}`);
-      return { error: `No results for query "${query_type}" on ID "${id}". This ID may not exist, may be deprecated, or this query type may not be supported for this entity. Try using the search_terms tool to verify the ID exists.` };
+      const available = await fetchAvailableQueryTypes(id);
+      return {
+        error: `No results for query "${query_type}" on ID "${id}". The query_type may not be supported for this entity, or there may be no data for this combination. Empty results do NOT mean the answer is unknown — only that this call did not return it. Try a different query_type from the Queries array below before concluding the data does not exist.${formatAvailableQueriesHint(id, available)}`,
+      };
     }
     if (response.data.error) {
       console.error(`MCP Debug: API error for query id=${id} query_type=${query_type}: ${response.data.error}`);
-      return { error: `${response.data.error}\n\nTo find valid query types for this term, first use the get_term_info tool with ID "${id}" to see the available queries in the "Queries" array.` };
+      const available = await fetchAvailableQueryTypes(id);
+      return {
+        error: `${response.data.error}${formatAvailableQueriesHint(id, available)}`,
+      };
     }
     console.error(`MCP Debug: Successfully ran query id=${id} query_type=${query_type}`);
     return { data: response.data };
