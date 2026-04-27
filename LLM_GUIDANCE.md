@@ -14,6 +14,14 @@ For any VFB or anatomy ontology ID (`VFB_*`, `FBbt_*`), the workflow is **always
 
 DO NOT call `run_query` with a guessed `query_type`. If a `query_type` is not in the entity's `Queries` array, that query is not available for that entity, and `run_query` will return an error.
 
+`get_term_info` also returns a **`RelatedTools`** array listing other MCP tools (not `run_query`) that are useful for this entity. Each entry has:
+
+- `tool` — the MCP tool name to call (e.g. `get_hierarchy`).
+- `label` — short human description.
+- `default_args` — arguments ready to copy into the tool call.
+
+Currently `get_term_info` surfaces `get_hierarchy` here for cell-type classes (`subclass_of`) and nervous-system regions (`part_of`). Call the named tool directly with `default_args` — do not pass these via `run_query`.
+
 ### Rule 2 — Empty results ≠ no data exists
 
 If `run_query` returns empty rows or an error:
