@@ -136,7 +136,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'run_query',
-          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type".',
+          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type". Results are PAGED: the first 25 rows by default (change with limit/offset) plus the true total as "count". Image/thumbnail columns are excluded by default to save space - pass include_images=true to include them.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -162,6 +162,18 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                   required: ['id', 'query_type'],
                 },
                 description: 'Array of {id, query_type} pairs for mixed batch queries. When provided, id and query_type params are ignored.',
+              },
+              limit: {
+                type: 'number',
+                description: 'Max rows returned per call (default 25). The true total is always returned as "count"; broad queries (e.g. ListAllAvailableImages, or NeuronsSynaptic on a whole region) can have thousands to hundreds of thousands of rows. Use 0 for all rows (still capped server-side ~25000 - avoid for broad queries).',
+              },
+              offset: {
+                type: 'number',
+                description: 'Row offset for paging (default 0). To get the next page, re-run with offset increased by limit; "count" gives the total.',
+              },
+              include_images: {
+                type: 'boolean',
+                description: 'Include the image/thumbnail column in result rows. Default false: the thumbnail is a long markdown image string that is rarely useful to reason over and greatly inflates every row, so it is stripped and the response says so in _note. Set true to include it (e.g. to build image URLs).',
               },
             },
           },
@@ -365,7 +377,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         case 'get_term_info':
           return await handleGetTermInfo(args as { id: string | string[] });
         case 'run_query':
-          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> });
+          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean });
         case 'search_terms':
           return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
         case 'resolve_entity':
@@ -483,7 +495,45 @@ function formatAvailableQueriesHint(id: string, queries: string[] | null): strin
   return `\n\nCould not retrieve the Queries array for "${id}". Call get_term_info("${id}") to verify the ID exists and to see its available query_types.`;
 }
 
-async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?: any; error?: string; redirect?: string }> {
+const RUN_QUERY_IMAGE_COLUMNS = ['thumbnail', 'thumbnail_transparent'];
+
+function shapeRunQueryResult(data: any, ctx: { includeImages: boolean; limit: number; offset: number }): any {
+  if (!data || !Array.isArray(data.rows)) { return data; }
+  const total = typeof data.count === 'number' ? data.count : data.rows.length;
+  let rows: any[] = data.rows;
+  let headers = data.headers;
+  let imagesExcluded = false;
+  if (!ctx.includeImages) {
+    rows = rows.map((r) => {
+      if (r && typeof r === 'object' && !Array.isArray(r)) {
+        const c: Record<string, any> = { ...r };
+        for (const k of RUN_QUERY_IMAGE_COLUMNS) { if (k in c) { delete c[k]; imagesExcluded = true; } }
+        return c;
+      }
+      return r;
+    });
+    if (headers && typeof headers === 'object') {
+      headers = { ...headers };
+      for (const k of RUN_QUERY_IMAGE_COLUMNS) { if (k in headers) { delete headers[k]; } }
+    }
+  }
+  const returned = rows.length;
+  const notes: string[] = [];
+  if (imagesExcluded) { notes.push('Image columns (thumbnail) were excluded to reduce size - re-run this query with include_images=true to include them.'); }
+  if (total > ctx.offset + returned) {
+    const nextOffset = ctx.offset + (ctx.limit > 0 ? ctx.limit : returned);
+    notes.push(`Showing rows ${ctx.offset}-${ctx.offset + returned} of ${total}. To see more, re-run with offset=${nextOffset} (same limit).`);
+  } else if (ctx.offset > 0) {
+    notes.push(`Showing rows ${ctx.offset}-${ctx.offset + returned} of ${total}.`);
+  }
+  const shaped: Record<string, any> = { count: total, offset: ctx.offset, limit: ctx.limit, returned };
+  if (notes.length) { shaped._note = notes.join(' '); }
+  shaped.headers = headers;
+  shaped.rows = rows;
+  return shaped;
+}
+
+async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: number; offset?: number; includeImages?: boolean } = {}): Promise<{ data?: any; error?: string; redirect?: string }> {
   // If the LLM accidentally passes a tool name as query_type, redirect
   if (query_type === 'get_term_info') {
     return { redirect: `Note: "get_term_info" is a separate tool, not a query_type for run_query. Use the get_term_info tool directly next time.` };
@@ -492,8 +542,13 @@ async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?
     return { redirect: `Note: "search_terms" is a separate tool, not a query_type for run_query. Use the search_terms tool directly with a query parameter.` };
   }
 
-  const url = `https://v3-cached.virtualflybrain.org/run_query?id=${id}&query_type=${query_type}`;
-  console.error(`MCP Debug: Running query id=${id} query_type=${query_type}`);
+  const limit = (opts.limit === undefined || opts.limit === null || Number.isNaN(opts.limit)) ? 25 : opts.limit;
+  const offset = (opts.offset === undefined || opts.offset === null || Number.isNaN(opts.offset)) ? 0 : opts.offset;
+  const includeImages = opts.includeImages === true;
+  const params = new URLSearchParams({ id, query_type });
+  if (limit > 0) { params.set('offset', String(offset)); params.set('limit', String(limit)); }
+  const url = `https://v3-cached.virtualflybrain.org/run_query?${params.toString()}`;
+  console.error(`MCP Debug: Running query id=${id} query_type=${query_type} limit=${limit} offset=${offset} includeImages=${includeImages}`);
   try {
     const response = await axios.get(url);
     if (response.data === null || response.data === undefined) {
@@ -511,15 +566,16 @@ async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?
       };
     }
     console.error(`MCP Debug: Successfully ran query id=${id} query_type=${query_type}`);
-    return { data: response.data };
+    return { data: shapeRunQueryResult(response.data, { includeImages, limit, offset }) };
   } catch (error) {
     console.error(`MCP Debug: Error running query id=${id} query_type=${query_type}:`, error);
     return { error: `Error running query "${query_type}" on "${id}": ${error}` };
   }
 }
 
-async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> }) {
-  const { id, query_type, queries } = args;
+async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean }) {
+  const { id, query_type, queries, limit, offset, include_images } = args;
+  const opts = { limit, offset, includeImages: include_images };
 
   // Build the list of {id, query_type} pairs to execute
   let queryPairs: Array<{ id: string; query_type: string }>;
@@ -540,7 +596,7 @@ async function handleRunQuery(args: { id?: string | string[]; query_type?: strin
   // Single query — preserve original response format
   if (queryPairs.length === 1) {
     const pair = queryPairs[0];
-    const result = await fetchSingleQuery(pair.id, pair.query_type);
+    const result = await fetchSingleQuery(pair.id, pair.query_type, opts);
 
     if (result.redirect) {
       // Tool name was passed as query_type — try to be helpful
@@ -558,7 +614,7 @@ async function handleRunQuery(args: { id?: string | string[]; query_type?: strin
 
   // Batch queries — run in parallel, return keyed object
   const results = await Promise.all(queryPairs.map(async (pair) => {
-    const result = await fetchSingleQuery(pair.id, pair.query_type);
+    const result = await fetchSingleQuery(pair.id, pair.query_type, opts);
     const key = `${pair.id}::${pair.query_type}`;
     return { key, result };
   }));
