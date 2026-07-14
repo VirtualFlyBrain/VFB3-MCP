@@ -155,6 +155,7 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `resolve_combination` — Resolve an unresolved split-GAL4 combination name or synonym into its component IDs
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters
+- `get_hierarchy` — Traverse the ontology hierarchy for a VFB ID: `part_of` (region/tissue structure) and/or `subclass_of` (cell-type taxonomy), ancestors and/or descendants
 
 ## 🛠️ Local Installation
 

@@ -12,7 +12,10 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 
-const VERSION = '1.8.1';
+// Version is single-sourced from package.json so a release tag (forced into
+// package.json by CI before the build) flows straight into serverInfo.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const VERSION: string = require('../package.json').version;
 
 // GA4 Analytics configuration
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID || 'G-K7DDZVVXM7';
