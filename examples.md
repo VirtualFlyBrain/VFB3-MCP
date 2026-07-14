@@ -170,6 +170,24 @@ This file contains examples of how to use the VFB3-MCP server tools.
 }
 ```
 
+### 13. Get Ontology Hierarchy
+
+Traverse `part_of` (region structure) or `subclass_of` (cell-type taxonomy) for a VFB term. `relationship` is required; `direction` defaults to `both` and `max_depth` to `1`.
+
+```json
+{
+  "name": "get_hierarchy",
+  "arguments": {
+    "id": "FBbt_00005801",
+    "relationship": "part_of",
+    "direction": "descendants",
+    "max_depth": 1
+  }
+}
+```
+
+Returns the direct parts of the mushroom body (`FBbt_00005801`). Use `relationship: "subclass_of"` for cell-type taxonomies (e.g. `FBbt_00003686`, Kenyon cell), and increase `max_depth` to expand deeper.
+
 ## Integration with MCP Clients
 
 ### Claude Desktop

@@ -390,6 +390,7 @@ There are **six** connectivity query types. Pick the right one using the decisio
 - To see upstream partner classes → use `run_query` with query_type `UpstreamClassConnectivity` (fast, pre-indexed)
 - To see region connectivity or neurotransmitter inputs for a neuron class → use the instance batch workflow described below
 - To filter by **both** upstream AND downstream class at the same time, or to retrieve results that include data from multiple connectome datasets → use `query_connectivity` (slow, live query)
+- Call `list_connectome_datasets` first when you need the available connectome dataset labels/IDs (e.g. to populate `query_connectivity`'s dataset filters, or to tell the user which connectomes exist).
 
 **Instance batch workflow — running individual neuron queries at the class level:**
 
