@@ -136,7 +136,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'run_query',
-          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type".',
+          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type". Results are PAGED: the first 25 rows by default (change with limit/offset) plus the true total as "count". Image/thumbnail columns are excluded by default to save space - pass include_images=true to include them. FlyBase integration is via query_types too: FindStocks (fly stocks for a FlyBase feature ID - FBgn/FBal/FBti/FBtp/FBco/FBst) and FindComboPublications (publications for an FBco split-GAL4 combination). Get those IDs from resolve_entity / resolve_combination first, then run_query with the ID and the query_type. Include FlyBase links in output: https://flybase.org/reports/{ID}.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -162,6 +162,18 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                   required: ['id', 'query_type'],
                 },
                 description: 'Array of {id, query_type} pairs for mixed batch queries. When provided, id and query_type params are ignored.',
+              },
+              limit: {
+                type: 'number',
+                description: 'Max rows returned per call (default 25). The true total is always returned as "count"; broad queries (e.g. ListAllAvailableImages, or NeuronsSynaptic on a whole region) can have thousands to hundreds of thousands of rows. Use 0 for all rows (still capped server-side ~25000 - avoid for broad queries).',
+              },
+              offset: {
+                type: 'number',
+                description: 'Row offset for paging (default 0). To get the next page, re-run with offset increased by limit; "count" gives the total.',
+              },
+              include_images: {
+                type: 'boolean',
+                description: 'Include the image/thumbnail column in result rows. Default false: the thumbnail is a long markdown image string that is rarely useful to reason over and greatly inflates every row, so it is stripped and the response says so in _note. Set true to include it (e.g. to build image URLs).',
               },
             },
           },
@@ -231,24 +243,6 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           },
         },
         {
-          name: 'find_stocks',
-          description: 'Find fly stocks (stock centre entries) for a FlyBase feature. Accepts FBgn (gene), FBal (allele), FBti (insertion), FBco (split-GAL4 combination), or FBst (stock) IDs. Gene queries search 4 paths: direct allele, allele→construct→insertion, allele→associated insertion, and regulatory region routes. Combination queries resolve component hemidrivers and find stocks for each. Returns stock IDs, names, collection (stock centre), and genotype info. Present results: ≤30 rows show full table; >30 rows show total count, breakdown by stock collection, and top 20 rows. Always include FlyBase links: stock reports https://flybase.org/reports/{FBst_ID}, entity reports https://flybase.org/reports/{feature_id}. Use resolve_entity first if you have a name rather than a FlyBase ID.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              feature_id: {
-                type: 'string',
-                description: 'FlyBase feature ID — FBgn (gene), FBal (allele), FBti (insertion), FBtp (construct), FBco (combination), or FBst (stock). Use resolve_entity first to obtain this from a name or synonym.',
-              },
-              collection_filter: {
-                type: 'string',
-                description: 'Optional stock centre name filter (case-insensitive partial match). Examples: "Bloomington", "Kyoto", "VDRC", "FlyORF", "Korea Drosophila Resource Center".',
-              },
-            },
-            required: ['feature_id'],
-          },
-        },
-        {
           name: 'resolve_combination',
           description: 'Resolve an unresolved split-GAL4 combination name or synonym into its FBco ID and component hemidrivers. Pass the raw combination text exactly as the user wrote it (for example "MB002B" or "SS04495"). Do NOT pass an FBco ID; if you already have one, use the downstream tool directly. Uses tiered resolution: exact name → synonym → broad pattern match. Returns FBco ID, combination name, matched synonym (if applicable), and component allele IDs/names. IMPORTANT: When match is via synonym, confirm the resolved combination with the user before proceeding (e.g., "Your search for \'MB002B\' matched [formal name] (FBco...) via synonym. Shall I proceed?"). If multiple matches, show disambiguation list and ask user to choose.',
           inputSchema: {
@@ -260,20 +254,6 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               },
             },
             required: ['name'],
-          },
-        },
-        {
-          name: 'find_combo_publications',
-          description: 'Find publications linked to a split-GAL4 combination by FBco ID. Returns publications with: FBrf ID, title, year, miniref (short citation), publication type, and external identifiers (DOI, PMID, PMCID) where available. Results sorted by year descending. Present each publication with title, year, citation, and links where identifiers exist: FlyBase https://flybase.org/reports/{FBrf_ID}, DOI https://doi.org/{DOI}, PubMed https://pubmed.ncbi.nlm.nih.gov/{PMID}/. Also include the combination report link: https://flybase.org/reports/{FBco_ID}. Use resolve_combination first if you have a name or synonym rather than an FBco ID.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              fbco_id: {
-                type: 'string',
-                description: 'FlyBase combination ID (e.g., "FBco0000052"). Use resolve_combination first to obtain this from a name or synonym.',
-              },
-            },
-            required: ['fbco_id'],
           },
         },
         {
@@ -365,17 +345,13 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         case 'get_term_info':
           return await handleGetTermInfo(args as { id: string | string[] });
         case 'run_query':
-          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> });
+          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean });
         case 'search_terms':
           return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
         case 'resolve_entity':
           return await handleResolveEntity(args as { name: string });
-        case 'find_stocks':
-          return await handleFindStocks(args as { feature_id: string; collection_filter?: string });
         case 'resolve_combination':
           return await handleResolveCombination(args as { name: string });
-        case 'find_combo_publications':
-          return await handleFindComboPublications(args as { fbco_id: string });
         case 'list_connectome_datasets':
           return await handleListConnectomeDatasets();
         case 'query_connectivity':
@@ -483,7 +459,45 @@ function formatAvailableQueriesHint(id: string, queries: string[] | null): strin
   return `\n\nCould not retrieve the Queries array for "${id}". Call get_term_info("${id}") to verify the ID exists and to see its available query_types.`;
 }
 
-async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?: any; error?: string; redirect?: string }> {
+const RUN_QUERY_IMAGE_COLUMNS = ['thumbnail', 'thumbnail_transparent'];
+
+function shapeRunQueryResult(data: any, ctx: { includeImages: boolean; limit: number; offset: number }): any {
+  if (!data || !Array.isArray(data.rows)) { return data; }
+  const total = typeof data.count === 'number' ? data.count : data.rows.length;
+  let rows: any[] = data.rows;
+  let headers = data.headers;
+  let imagesExcluded = false;
+  if (!ctx.includeImages) {
+    rows = rows.map((r) => {
+      if (r && typeof r === 'object' && !Array.isArray(r)) {
+        const c: Record<string, any> = { ...r };
+        for (const k of RUN_QUERY_IMAGE_COLUMNS) { if (k in c) { delete c[k]; imagesExcluded = true; } }
+        return c;
+      }
+      return r;
+    });
+    if (headers && typeof headers === 'object') {
+      headers = { ...headers };
+      for (const k of RUN_QUERY_IMAGE_COLUMNS) { if (k in headers) { delete headers[k]; } }
+    }
+  }
+  const returned = rows.length;
+  const notes: string[] = [];
+  if (imagesExcluded) { notes.push('Image columns (thumbnail) were excluded to reduce size - re-run this query with include_images=true to include them.'); }
+  if (total > ctx.offset + returned) {
+    const nextOffset = ctx.offset + (ctx.limit > 0 ? ctx.limit : returned);
+    notes.push(`Showing rows ${ctx.offset}-${ctx.offset + returned} of ${total}. To see more, re-run with offset=${nextOffset} (same limit).`);
+  } else if (ctx.offset > 0) {
+    notes.push(`Showing rows ${ctx.offset}-${ctx.offset + returned} of ${total}.`);
+  }
+  const shaped: Record<string, any> = { count: total, offset: ctx.offset, limit: ctx.limit, returned };
+  if (notes.length) { shaped._note = notes.join(' '); }
+  shaped.headers = headers;
+  shaped.rows = rows;
+  return shaped;
+}
+
+async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: number; offset?: number; includeImages?: boolean } = {}): Promise<{ data?: any; error?: string; redirect?: string }> {
   // If the LLM accidentally passes a tool name as query_type, redirect
   if (query_type === 'get_term_info') {
     return { redirect: `Note: "get_term_info" is a separate tool, not a query_type for run_query. Use the get_term_info tool directly next time.` };
@@ -492,8 +506,13 @@ async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?
     return { redirect: `Note: "search_terms" is a separate tool, not a query_type for run_query. Use the search_terms tool directly with a query parameter.` };
   }
 
-  const url = `https://v3-cached.virtualflybrain.org/run_query?id=${id}&query_type=${query_type}`;
-  console.error(`MCP Debug: Running query id=${id} query_type=${query_type}`);
+  const limit = (opts.limit === undefined || opts.limit === null || Number.isNaN(opts.limit)) ? 25 : opts.limit;
+  const offset = (opts.offset === undefined || opts.offset === null || Number.isNaN(opts.offset)) ? 0 : opts.offset;
+  const includeImages = opts.includeImages === true;
+  const params = new URLSearchParams({ id, query_type });
+  if (limit > 0) { params.set('offset', String(offset)); params.set('limit', String(limit)); }
+  const url = `https://v3-cached.virtualflybrain.org/run_query?${params.toString()}`;
+  console.error(`MCP Debug: Running query id=${id} query_type=${query_type} limit=${limit} offset=${offset} includeImages=${includeImages}`);
   try {
     const response = await axios.get(url);
     if (response.data === null || response.data === undefined) {
@@ -511,15 +530,16 @@ async function fetchSingleQuery(id: string, query_type: string): Promise<{ data?
       };
     }
     console.error(`MCP Debug: Successfully ran query id=${id} query_type=${query_type}`);
-    return { data: response.data };
+    return { data: shapeRunQueryResult(response.data, { includeImages, limit, offset }) };
   } catch (error) {
     console.error(`MCP Debug: Error running query id=${id} query_type=${query_type}:`, error);
     return { error: `Error running query "${query_type}" on "${id}": ${error}` };
   }
 }
 
-async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }> }) {
-  const { id, query_type, queries } = args;
+async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean }) {
+  const { id, query_type, queries, limit, offset, include_images } = args;
+  const opts = { limit, offset, includeImages: include_images };
 
   // Build the list of {id, query_type} pairs to execute
   let queryPairs: Array<{ id: string; query_type: string }>;
@@ -540,7 +560,7 @@ async function handleRunQuery(args: { id?: string | string[]; query_type?: strin
   // Single query — preserve original response format
   if (queryPairs.length === 1) {
     const pair = queryPairs[0];
-    const result = await fetchSingleQuery(pair.id, pair.query_type);
+    const result = await fetchSingleQuery(pair.id, pair.query_type, opts);
 
     if (result.redirect) {
       // Tool name was passed as query_type — try to be helpful
@@ -558,7 +578,7 @@ async function handleRunQuery(args: { id?: string | string[]; query_type?: strin
 
   // Batch queries — run in parallel, return keyed object
   const results = await Promise.all(queryPairs.map(async (pair) => {
-    const result = await fetchSingleQuery(pair.id, pair.query_type);
+    const result = await fetchSingleQuery(pair.id, pair.query_type, opts);
     const key = `${pair.id}::${pair.query_type}`;
     return { key, result };
   }));
@@ -749,7 +769,7 @@ async function handleResolveEntity(args: { name: string }): Promise<{ content: A
     return {
       content: [{
         type: 'text',
-        text: `Error: resolve_entity expects unresolved user text such as "P{VT054895-GAL4.DBD}" or "Hb9-GAL4", not a resolved ID like "${rawName}". If you already have a FlyBase feature ID, call find_stocks directly. If you already have a VFB ID, use search_terms, get_term_info, or run_query as appropriate.`,
+        text: `Error: resolve_entity expects unresolved user text such as "P{VT054895-GAL4.DBD}" or "Hb9-GAL4", not a resolved ID like "${rawName}". If you already have a FlyBase feature ID, call run_query with query_type "FindStocks" (id = the FlyBase feature ID). If you already have a VFB ID, use search_terms, get_term_info, or run_query as appropriate.`,
       }],
     };
   }
@@ -764,19 +784,6 @@ async function handleResolveEntity(args: { name: string }): Promise<{ content: A
   }
 }
 
-async function handleFindStocks(args: { feature_id: string; collection_filter?: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  let url = `${VFBQUERY_BASE}/find_stocks?id=${encodeURIComponent(args.feature_id)}`;
-  if (args.collection_filter) {
-    url += `&collection=${encodeURIComponent(args.collection_filter)}`;
-  }
-  console.error(`MCP Debug: find_stocks feature_id="${args.feature_id}" collection_filter="${args.collection_filter || ''}"`);
-  try {
-    const response = await axios.get(url);
-    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
-  } catch (error) {
-    return { content: [{ type: 'text', text: `Error finding stocks for "${args.feature_id}": ${error}` }] };
-  }
-}
 
 async function handleResolveCombination(args: { name: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
   const rawName = args.name.trim();
@@ -794,7 +801,7 @@ async function handleResolveCombination(args: { name: string }): Promise<{ conte
     return {
       content: [{
         type: 'text',
-        text: `Error: resolve_combination expects unresolved user text such as "MB002B" or "SS04495", not an FBco ID like "${rawName}". If you already have an FBco ID, call find_combo_publications directly.`,
+        text: `Error: resolve_combination expects unresolved user text such as "MB002B" or "SS04495", not an FBco ID like "${rawName}". If you already have an FBco ID, call run_query with query_type "FindComboPublications" (id = the FBco ID).`,
       }],
     };
   }
@@ -809,16 +816,6 @@ async function handleResolveCombination(args: { name: string }): Promise<{ conte
   }
 }
 
-async function handleFindComboPublications(args: { fbco_id: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const url = `${VFBQUERY_BASE}/find_combo_publications?id=${encodeURIComponent(args.fbco_id)}`;
-  console.error(`MCP Debug: find_combo_publications fbco_id="${args.fbco_id}"`);
-  try {
-    const response = await axios.get(url);
-    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
-  } catch (error) {
-    return { content: [{ type: 'text', text: `Error finding publications for "${args.fbco_id}": ${error}` }] };
-  }
-}
 
 async function handleListConnectomeDatasets(): Promise<{ content: Array<{ type: string; text: string }> }> {
   const url = `${VFBQUERY_BASE}/list_connectome_datasets`;
@@ -1064,9 +1061,7 @@ function getHtmlPage(): string {
     <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
     <li><code>search_terms</code> - Search for VFB terms using the Solr search server with filtering options</li>
     <li><code>resolve_entity</code> - Resolve an unresolved query string (e.g., P{VT054895-GAL4.DBD} or a driver line / cell type label) to VFB/FlyBase IDs and metadata</li>
-    <li><code>find_stocks</code> - Find fly stocks for a FlyBase feature ID (e.g., driver line, enhancer, or tool line)</li>
     <li><code>resolve_combination</code> - Resolve an unresolved split-GAL4 combination name or synonym to its underlying IDs</li>
-    <li><code>find_combo_publications</code> - Find publications associated with a split-GAL4 combination</li>
     <li><code>list_connectome_datasets</code> - List available connectome datasets (e.g., Hemibrain, FAFB)</li>
     <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters</li>
   </ul>

@@ -23,8 +23,8 @@ DO NOT call `run_query` with a guessed `query_type`. If a `query_type` is not in
 Currently `get_term_info` surfaces:
 
 - `get_hierarchy` — for cell-type classes (`subclass_of`) and nervous-system regions (`part_of`).
-- `find_stocks` — for FlyBase feature IDs (FBgn, FBal, FBti, FBtp, FBco, FBst). Use this rather than `run_query`/`FindStocks` when you need the `collection_filter` argument (Bloomington, Kyoto, VDRC, etc.).
-- `find_combo_publications` — for FBco split-GAL4 combinations. Use this rather than `run_query`/`FindComboPublications` when you need full citation metadata (DOI, PMID, miniref, year) for paper rendering.
+
+FlyBase stocks and split-GAL4 combination publications are NOT RelatedTools — they are `run_query` query_types (`FindStocks` for FlyBase feature IDs FBgn/FBal/FBti/FBtp/FBco/FBst, and `FindComboPublications` for FBco combinations), offered in the `Queries` array of those terms. Get the FlyBase/FBco ID from `resolve_entity` / `resolve_combination` first, then call `run_query` with that ID and the query_type.
 
 Call the named tool directly with `default_args` — do not pass these values via `run_query`.
 
@@ -153,31 +153,31 @@ Returns tabular data from pre-computed analyses:
 
 ```json
 {
+  "count": 1,
+  "offset": 0,
+  "limit": 25,
+  "returned": 1,
+  "_note": "Image columns (thumbnail) were excluded to reduce size - re-run this query with include_images=true to include them.",
   "headers": {
     "id": {"title": "ID", "type": "selection_id"},
     "name": {"title": "Domain", "type": "markdown"},
-    "type": {"title": "Type", "type": "text"},
-    "thumbnail": {"title": "Thumbnail", "type": "markdown"}
+    "type": {"title": "Type", "type": "text"}
   },
   "rows": [
     {
       "id": "VFB_00102141",
       "name": "[AOTU on JRC2018Unisex adult brain](https://v2.virtualflybrain.org/...)",
-      "type": "Expression_pattern",
-      "thumbnail": "![thumbnail](https://v2.virtualflybrain.org/...)"
+      "type": "Expression_pattern"
     }
-  ],
-  "count": 1,
-  "label": "Painted Domains",
-  "Tags": ["Expression", "Anatomy"]
+  ]
 }
 ```
 
 **Interpretation:**
-- **Headers**: Column definitions with display types
-- **Rows**: Actual data with IDs, names, and thumbnails
-- **Count**: Total number of results
-- **Label**: Query type description
+- **count**: The TRUE total number of results — may be far larger than the rows returned.
+- **offset / limit / returned**: Paging state. Only the current page (default 25 rows) is returned; to get the next page re-run with `offset` increased by `limit`.
+- **_note**: Present when rows were paged and/or images excluded — states how to page further and how to re-add images (`include_images: true`).
+- **Headers / Rows**: Column definitions and the current page of data. The `thumbnail` column is EXCLUDED by default; pass `include_images: true` to include it.
 
 ### **Search Results Response (`search_terms`)**
 
@@ -276,11 +276,11 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 ### Workflow
 
 1. **Parse input** — Identify whether the user provides a name, synonym, or FlyBase ID:
-   - `FBgn\d+` → gene ID (direct to `find_stocks`)
-   - `FBal\d+` → allele ID (direct to `find_stocks`)
-   - `FBti\d+` → insertion ID (direct to `find_stocks`)
-   - `FBco\d+` → combination ID (direct to `find_stocks`)
-   - `FBst\d+` → stock ID (direct to `find_stocks`)
+   - `FBgn\d+` → gene ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBal\d+` → allele ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBti\d+` → insertion ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBco\d+` → combination ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBst\d+` → stock ID (use `run_query` with `query_type` `FindStocks`)
    - Any other string → resolve first with `resolve_entity`
 
 2. **Resolve entity** — If user provides a name (not an ID), call `resolve_entity` with the raw unresolved string exactly as written. It uses tiered resolution:
@@ -293,7 +293,7 @@ Available filter types are loaded dynamically from Solr at server startup, so th
    - If **multiple matches**, show a disambiguation list (name, ID, type) and ask user to choose.
    - **Wait for user reply** — do NOT assume confirmation.
 
-4. **Find stocks** — Call `find_stocks` with the resolved FlyBase feature ID. Include `collection_filter` if user specified a stock centre.
+4. **Find stocks** — Call `run_query` with `query_type` `FindStocks` and `id` = the resolved FlyBase feature ID.
 
 5. **Present results:**
    - Always start with a **query summary block**:
@@ -342,7 +342,7 @@ Available filter types are loaded dynamically from Solr at server startup, so th
    - If **multiple matches**, show disambiguation list and ask user to choose.
    - **Wait for user reply** — do NOT assume confirmation.
 
-4. **Find publications** — Call `find_combo_publications` with the FBco ID.
+4. **Find publications** — Call `run_query` with `query_type` `FindComboPublications` and `id` = the FBco ID.
 
 5. **Present results:**
    - **Query summary block:**
@@ -618,8 +618,8 @@ The core chain (see Rule 1 at the top) is **search → discover → query**:
 `search_terms` → `get_term_info` (read the `Queries` array) → `run_query` (with a `query_type` from that array).
 
 Specific patterns:
-- `resolve_entity` → `find_stocks`
-- `resolve_combination` → `find_combo_publications`
+- `resolve_entity` → `run_query` with `query_type` `FindStocks`
+- `resolve_combination` → `run_query` with `query_type` `FindComboPublications`
 - `search_terms` (find neuron class) → `get_term_info` → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
 - `search_terms` (validate neuron class) → `query_connectivity` (dual-end class-to-class)
 - `search_terms` → `get_term_info` (get VFB ID) → `run_query` with `NeuronNeuronConnectivityQuery`, `NeuronRegionConnectivityQuery`, or `NeuronInputsTo`
