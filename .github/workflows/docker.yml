@@ -17,6 +17,18 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    # On a release tag, force the in-image version to match the tag so the
+    # running server, package.json and server.json all report the released
+    # version (VERSION in src is read from package.json). Non-tag builds keep
+    # the committed version. Mirrors the version step in publish-mcp.yml.
+    - name: Set version from release tag
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "Forcing version to $VERSION"
+        jq --arg v "$VERSION" '.version = $v' package.json > package.tmp && mv package.tmp package.json
+        jq --arg v "$VERSION" '.version = $v' server.json  > server.tmp  && mv server.tmp  server.json
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
