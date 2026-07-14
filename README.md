@@ -152,9 +152,7 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `run_query` — Run a precomputed analysis query for a VFB ID (see the `Queries` field from `get_term_info`)
 - `search_terms` — Search VFB entities by text with filtering / boosting options
 - `resolve_entity` — Resolve an unresolved FlyBase-related query string (e.g., `P{VT054895-GAL4.DBD}` or a driver line / cell type label) to VFB/FlyBase IDs and metadata (not the same as VFB term search)
-- `find_stocks` — Find fly stocks for a FlyBase feature ID (e.g., driver line, enhancer, or tool line)
 - `resolve_combination` — Resolve an unresolved split-GAL4 combination name or synonym into its component IDs
-- `find_combo_publications` — Find publications associated with a split-GAL4 combination (fbco_id)
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters
 
@@ -279,8 +277,14 @@ Retrieve detailed information about VFB terms using their IDs.
 Execute predefined queries on VFB data.
 
 **Parameters:**
-- `id` (string): VFB ID (e.g., "VFB_00101567")
-- `query_type` (string): Type of query (e.g., "PaintedDomains")
+- `id` (string or array): One or more VFB IDs (e.g., "VFB_00101567")
+- `query_type` (string): Query type from the entity's `Queries` array (e.g., "PaintedDomains")
+- `queries` (array, optional): `{id, query_type}` pairs for mixed batch queries
+- `limit` (number, optional): Max rows per call (default 25). The true total is always returned as `count`; use 0 for all rows (still capped ~25000)
+- `offset` (number, optional): Row offset for paging (default 0); re-run with `offset += limit` for the next page
+- `include_images` (boolean, optional): Include the `thumbnail` column (default false — it is stripped to save space, and the response `_note` says how to re-add it)
+
+FlyBase stocks and split-GAL4 combination publications are run_query query_types too: `FindStocks` and `FindComboPublications`.
 
 ### search_terms
 Search for VFB terms using the Solr search server with optional filtering and result control.

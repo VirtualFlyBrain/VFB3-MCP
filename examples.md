@@ -106,10 +106,10 @@ This file contains examples of how to use the VFB3-MCP server tools.
 {
   "method": "tools/call",
   "params": {
-    "name": "find_stocks",
+    "name": "run_query",
     "arguments": {
-      "feature_id": "FBst123456",
-      "collection_filter": "Bloomington"
+      "id": "FBst123456",
+      "query_type": "FindStocks"
     }
   }
 }
@@ -133,9 +133,10 @@ This file contains examples of how to use the VFB3-MCP server tools.
 {
   "method": "tools/call",
   "params": {
-    "name": "find_combo_publications",
+    "name": "run_query",
     "arguments": {
-      "fbco_id": "FBco_0001234"
+      "id": "FBco_0001234",
+      "query_type": "FindComboPublications"
     }
   }
 }

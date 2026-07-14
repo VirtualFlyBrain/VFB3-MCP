@@ -182,9 +182,9 @@ The server integrates with VirtualFlyBrain APIs:
 - **API Call**: POST to term info endpoint
 
 #### run_query
-- **Input**: VFB ID and query type
-- **Output**: Tabular data with headers, rows, thumbnails
-- **API Call**: POST to query endpoint
+- **Input**: VFB ID(s) and query type; optional `limit`/`offset` (paging) and `include_images`
+- **Output**: A page of tabular data (default 25 rows) with `headers`, `rows`, the true total `count`, and paging metadata (`offset`/`limit`/`returned`/`_note`). The `thumbnail` column is excluded unless `include_images` is set. FlyBase `FindStocks` / `FindComboPublications` are query_types here.
+- **API Call**: GET `run_query` with `offset`/`limit`
 
 #### search_terms
 - **Input**: Search query with optional filters, pagination, and result control parameters
