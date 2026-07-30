@@ -315,7 +315,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               exclude_dbs: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Dataset symbols to exclude (recommended default: ["hb", "fafb"] to focus on newer datasets). Pass empty array [] to include all datasets. Use list_connectome_datasets to see valid symbols.',
+                description: 'Dataset symbols to exclude (recommended default: ["hb", "fafb"] to focus on newer datasets). Pass empty array [] to include all datasets. Must be the exact `symbol` field from list_connectome_datasets — currently BANC, fw, ol, mv, hb, mc, fafb, l1em. An unrecognised symbol is silently ignored by the server rather than reported, so a dataset name ("hemibrain", "male-cns", "flywire") excludes nothing and gives no warning. Call list_connectome_datasets rather than guessing.',
               },
               limit: {
                 type: 'number',

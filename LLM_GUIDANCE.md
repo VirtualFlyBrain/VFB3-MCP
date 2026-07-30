@@ -527,10 +527,10 @@ Or for `query_connectivity`:
 ```
 Query:
 - Upstream type:   transmedullary neuron Tm1 (FBbt_00003789)
-- Downstream type: T3 neuron (FBbt_00047727)
+- Downstream type: T3 neuron (FBbt_00003730)
 - Min. weight:     5
-- Excluded DBs:    hb, fafb
-Results: 142 connections across 28 upstream neurons → 85 downstream neurons
+- Excluded DBs:    mc
+Results: 7309 connections across 28 upstream neurons → 85 downstream neurons
 ```
 
 **Result formatting:**

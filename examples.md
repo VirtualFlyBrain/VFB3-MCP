@@ -194,18 +194,23 @@ across rows; the default `unique: true` gives one row per term instead.
     "name": "query_connectivity",
     "arguments": {
       "upstream_type": "FBbt_00003789",
-      "downstream_type": "FBbt_00047727",
+      "downstream_type": "FBbt_00003730",
       "weight": 5,
       "group_by_class": true,
-      "exclude_dbs": ["hb", "fafb"]
+      "exclude_dbs": ["mc"]
     }
   }
 }
 ```
 
-Tm1 → T3 across every connectome dataset except Hemibrain and FAFB. At least one of
-`upstream_type` / `downstream_type` is required, and `exclude_dbs` takes dataset
-*symbols* (`hb`, `fafb`) — see `list_connectome_datasets` for the valid set.
+Tm1 → T3 across every connectome dataset except male-CNS: 11,916 connections
+unfiltered, 7,309 with `mc` excluded. At least one of `upstream_type` /
+`downstream_type` is required.
+
+`exclude_dbs` takes dataset **symbols**, and an unrecognised symbol is silently
+ignored rather than reported — `exclude_dbs: ["male-cns"]` or `["hemibrain"]` excludes
+nothing and says nothing. Call `list_connectome_datasets` and use the `symbol` field:
+`BANC`, `fw`, `ol`, `mv`, `hb`, `mc`, `fafb`, `l1em`.
 
 Results come back as a strongest-first page plus a `summary` computed over every
 connection found, so `count` is the true total and `returned` is only what you were
