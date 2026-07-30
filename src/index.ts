@@ -655,8 +655,18 @@ const SEARCH_CANDIDATE_POOL = 500;
 
 // null until the first `unique` request answers it. The deployed service
 // silently ignores query params it does not know, so the only way to tell
-// whether it applied `unique` is whether it echoes the flag back; the answer
-// cannot change under a running process.
+// whether it applied `unique` is whether it echoes the flag back.
+//
+// null is treated as "probably yes": every currently deployed VFBquery honours
+// `unique`, so paying the un-truncated fetch on the first search of every
+// process to re-prove that is a 600KB tax on the common case. A server that
+// turns out not to echo the flag gets one refetch, then the answer is cached
+// here.
+//
+// The answer can flip mid-process, which is why this is re-read rather than
+// frozen: VFBQUERY_BASE sits behind an nginx cache, so a URL first requested
+// before `unique` shipped keeps answering with the old body (no `unique`, no
+// `distinct_terms`) while a novel URL answers with the new one.
 let searchUniqueIsServerSide: boolean | null = null;
 
 function dedupeSearchRows(rows: any[]): any[] {
@@ -671,6 +681,18 @@ function dedupeSearchRows(rows: any[]): any[] {
     out.push(row);
   }
   return out;
+}
+
+// VFBquery's handlers explain their own rejections in the body — an unknown type
+// name with suggestions, "At least one of upstream_type or downstream_type", a
+// bad `relationship`. Some return JSON and some plain text, and passing the bare
+// AxiosError up says only "status code 400", which tells the caller nothing about
+// what to change.
+function rejectionDetail(error: any): string | null {
+  const data = error?.response?.data;
+  if (data == null) return null;
+  if (typeof data === 'string') return data.trim() || null;
+  return data.error ?? data.detail ?? null;
 }
 
 async function fetchSearch(params: URLSearchParams): Promise<any> {
@@ -716,7 +738,7 @@ async function handleSearchTerms(args: {
   // Truncating server-side keeps the payload small, but only when the server
   // collapses synonym rows itself; otherwise the rows past the limit are
   // exactly the ones that would survive de-duplication here.
-  if (!wantUnique || searchUniqueIsServerSide === true) {
+  if (!wantUnique || searchUniqueIsServerSide !== false) {
     params.set('limit', String(start + rows));
   }
 
@@ -792,7 +814,7 @@ async function handleSearchTerms(args: {
     notes.push('Only short_form, label and original_label are shown; re-run with minimize_results=false for facets and IDs.');
   }
   if (wantUnique && !serverUnique) {
-    notes.push('The deployed VFBquery predates server-side unique, so duplicate synonym rows were collapsed by this MCP server instead. Ranking is unaffected; total counts terms.');
+    notes.push('The VFBquery response did not report server-side unique — either an older deployment, or a response cached from before it shipped — so duplicate synonym rows were collapsed by this MCP server instead. Ranking is unaffected; total counts terms.');
   }
   if (solrMatches !== undefined && solrMatches > pool) {
     notes.push(`Solr matched ${solrMatches} terms but only the top ${pool} were ranked, so this is not an exhaustive list. Narrow the query or add filter_types rather than paging past ${pool}.`);
@@ -1167,13 +1189,7 @@ async function handleQueryConnectivity(args: {
     const response = await axios.get(url, { timeout: 300000 }); // 5 min — live cross-dataset query
     return { content: [{ type: 'text', text: JSON.stringify(shapeConnectivityResult(response.data, { limit, offset }), null, 2) }] };
   } catch (error) {
-    // The endpoint explains its own rejections ("At least one of upstream_type or
-    // downstream_type required", an unresolvable class label). Passing the bare
-    // AxiosError up just says "400" and leaves the caller guessing, so surface
-    // the body — it usually tells the caller exactly what to change.
-    const detail = (error as any)?.response?.data?.error
-      ?? (error as any)?.response?.data?.detail
-      ?? (typeof (error as any)?.response?.data === 'string' ? (error as any).response.data : null);
+    const detail = rejectionDetail(error);
     if (detail) {
       return { content: [{ type: 'text', text: `Connectivity query rejected: ${detail}` }] };
     }
@@ -1189,7 +1205,10 @@ async function handleGetHierarchy(args: {
 }): Promise<{ content: Array<{ type: string; text: string }> }> {
   const params = new URLSearchParams();
   params.set('id', args.id);
-  params.set('relationship', args.relationship);
+  // Omit rather than send "undefined": the schema requires `relationship`, but a
+  // caller that drops it should get the endpoint's own default (part_of) instead
+  // of a 400 on a literal string.
+  if (args.relationship) params.set('relationship', args.relationship);
   if (args.direction) params.set('direction', args.direction);
   if (args.max_depth !== undefined) params.set('max_depth', String(args.max_depth));
   const url = `${VFBQUERY_BASE}/get_hierarchy?${params.toString()}`;
@@ -1198,6 +1217,10 @@ async function handleGetHierarchy(args: {
     const response = await axios.get(url, { timeout: 120000 }); // 2 min
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Hierarchy request rejected: ${detail}` }] };
+    }
     return { content: [{ type: 'text', text: `Error getting hierarchy: ${error}` }] };
   }
 }
