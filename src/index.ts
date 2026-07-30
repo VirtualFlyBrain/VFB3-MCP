@@ -183,7 +183,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'search_terms',
-          description: 'Search VFB terms (Solr). USE filter_types BY DEFAULT — unfiltered searches return deprecated terms, scRNAseq artifacts, and developmental stages mixed in with the entity the user wants.\n\nCommon filter_types recipes:\n- Neuron classes: ["neuron", "class"]\n- Individual neurons with images: ["neuron", "has_image"]\n- Neurons with connectome data: ["neuron", "has_neuron_connectivity"]\n- Brain regions / neuropils: ["anatomy"]\n- Genes: ["gene"]\n- Driver lines / expression patterns: ["expression_pattern"]\n- Datasets: ["dataset"]\nAdd exclude_types: ["deprecated"] to almost any search to remove obsolete entities.\n\nStage filtering: VFB covers adult, larval, and embryonic data, and many anatomical FBbt classes are stage-agnostic. Do NOT add "adult" or "larva" to filter_types by default — only add them when the user is explicit about a stage (e.g. "adult Kenyon cells", "larval mushroom body"). Default searches should leave stage out so stage-agnostic classes and all life stages are visible.\n\nUseful flags:\n- minimize_results=true → top 10 + truncation metadata, for exploratory searches.\n- auto_fetch_term_info=true → if an exact label match is found, returns get_term_info in the same response.\n- boost_types=["has_image", "has_neuron_connectivity"] → soft-rank data-rich entities first without excluding others.\n\nIf the search returns no good matches, do NOT fall back to training-data answers — try alternative spellings, synonyms, broader terms, or different filter_types.\n\nMultiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types soft-rank without excluding.\n\nAvailable filter types: entity, anatomy, nervous_system, individual, has_image, adult, cell, neuron, vfb, has_neuron_connectivity, nblast, visual_system, cholinergic, class, secondary_neuron, expression_pattern, gabaergic, expression_pattern_fragment, glutamatergic, feature, sensory_neuron, neuronbridge, deprecated, larva, has_region_connectivity, nblastexp, gene, primary_neuron, flycircuit, mechanosensory_system, histaminergic, lineage_mbp, peptidergic, hasscrnaseq, chemosensory_system, split, has_subclass, olfactory_system, dopaminergic, fafb, l1em, pub, enzyme, motor_neuron, cluster, lineage_6, lineage_3, serotonergic, lineage_19, lineage_cm3, lineage_dm6, proprioceptive_system, gustatory_system, sense_organ, lineage_mbp4, lineage_mbp1, lineage_1, lineage_mbp2, lineage_all1, lineage_balc, lineage_cm4, lineage_dm4, muscle, lineage_13, lineage_8, lineage_mbp3, lineage_12, lineage_dm1, lineage_dpmm1, lineage_9, lineage_cp2, lineage_dl1, fanc, lineage_7, lineage_vpnd2, lineage_dm3, lineage_dpmpm2, lineage_14, lineage_4, lineage_blp1, lineage_dalv2, lineage_eba1, lineage_dm2, lineage_dpmpm1, auditory_system, lineage_16, lineage_blvp1, lineage_blav2, lineage_vlpl2, lineage_alad1, lineage_bamv3, lineage_bld6, lineage_vpnd1, synaptic_neuropil, lineage_23, lineage_17, lineage_10, lineage_dplpv, lineage_21, lineage_alv1\n\nMultiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types soft-rank matching results higher without excluding others.',
+          description: 'Search VFB terms. This is the search virtualflybrain.org itself runs — the same Solr query, the same ranking — so what comes back first here is what a user would see first on the site.\n\nUSE filter_types BY DEFAULT. Unfiltered searches mix scRNAseq artifacts and developmental stages in with the entity the user wants.\n\nCommon filter_types recipes:\n- Neuron classes: ["neuron", "class"]\n- Individual neurons with images: ["neuron", "has_image"]\n- Neurons with connectome data: ["neuron", "has_neuron_connectivity"]\n- Brain regions / neuropils: ["anatomy"]\n- Genes: ["gene"]\n- Driver lines / expression patterns: ["expression_pattern"]\n- Datasets: ["dataset"]\n\nThere are over 200 type names and they change as data is added, so do NOT guess them: call list_search_facets to see the current vocabulary (optionally filtered, e.g. contains="lineage"). Names are matched case- and separator-insensitively, and a name that does not exist is an error with suggestions rather than a silently empty result.\n\nDeprecated terms are excluded by the search itself — you do not need exclude_types: ["deprecated"], and adding it is harmless but pointless.\n\nStage filtering: VFB covers adult, larval, and embryonic data, and many anatomical FBbt classes are stage-agnostic. Do NOT add "adult" or "larva" to filter_types by default — only add them when the user is explicit about a stage (e.g. "adult Kenyon cells", "larval mushroom body"). Default searches should leave stage out so stage-agnostic classes and all life stages are visible.\n\nUseful flags:\n- unique=true (the default) → one row per term. Turn it OFF only when you need to see WHICH synonym matched; with unique=false a term appears once per matching synonym, so "Kenyon cell" can return the same ID several times.\n- minimize_results=true → top 10, essential fields only, for exploratory searches.\n- auto_fetch_term_info=true → if an exact label match is found, returns get_term_info in the same response.\n- boost_types=["has_image", "has_neuron_connectivity"] → float data-rich entities to the top of the list without excluding anything else.\n- demote_types=["expression_pattern_fragment"] → sink noisy types to the bottom of the list instead of removing them.\n\nIf the search returns no good matches, do NOT fall back to training-data answers — try alternative spellings, synonyms, broader terms, or different filter_types.\n\nMultiple filter_types are ANDed (results must match ALL). Multiple exclude_types are ORed (any match excludes). boost_types and demote_types re-order without excluding; boost wins if a term matches both.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -194,17 +194,27 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               filter_types: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Filter results to only include items matching ALL of these facets_annotation types (AND logic)',
+                description: 'Filter results to only include items matching ALL of these facets_annotation types (AND logic). Use list_search_facets for valid names.',
               },
               exclude_types: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Exclude results matching ANY of these facets_annotation types (OR logic)',
+                description: 'Exclude results matching ANY of these facets_annotation types (OR logic). Deprecated terms are already excluded.',
               },
               boost_types: {
                 type: 'array',
                 items: { type: 'string' },
-                description: 'Boost ranking of results matching these facets_annotation types without excluding others',
+                description: 'Float results matching these facets_annotation types to the top of the ranked list without excluding others',
+              },
+              demote_types: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Sink results matching these facets_annotation types to the bottom of the ranked list without excluding them. Ignored for a type that also appears in boost_types.',
+              },
+              unique: {
+                type: 'boolean',
+                description: 'One row per term (default true). Set false to get a row per matching synonym, which shows WHICH name matched at the cost of repeating IDs.',
+                default: true,
               },
               start: {
                 type: 'number',
@@ -219,7 +229,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               },
               minimize_results: {
                 type: 'boolean',
-                description: 'When true, limit results to top 10 for initial searches and add truncation metadata. For exact matches, return only the matching result.',
+                description: 'When true, return at most 10 results with only the essential fields. For exact matches, return only the matching result.',
                 default: false,
               },
               auto_fetch_term_info: {
@@ -229,6 +239,19 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               },
             },
             required: ['query'],
+          },
+        },
+        {
+          name: 'list_search_facets',
+          description: 'List the type names search_terms can filter, exclude, boost or demote by, with the number of terms carrying each one. Call this instead of guessing: there are over 200 names, they are the index\'s own annotations rather than a curated list, and they change as data is added. Use contains to narrow (e.g. contains="lineage" for the ~120 lineage clones, contains="connectivity" to find the connectome facets). The counts tell you whether a name is broad or niche — "entity" covers everything, a single lineage covers a handful.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              contains: {
+                type: 'string',
+                description: 'Only return type names containing this text. Matched case- and separator-insensitively, so "nervous system" finds "Nervous_system".',
+              },
+            },
           },
         },
         {
@@ -269,7 +292,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'query_connectivity',
-          description: 'Query synaptic connectivity between Drosophila neuron classes across ALL connectome datasets simultaneously for comparative connectomics. This is NOT pre-cached — it runs live queries, so expect slow responses (up to several minutes). Set both upstream_type AND downstream_type to filter connections between two specific neuron classes (e.g., "What Tm1→T3 connections exist across all datasets?"). At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections — for pre-computed connections of a single individual neuron, use run_query with NeuronNeuronConnectivityQuery instead. NOT for muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. For both-ends queries, start with weight≥50 to avoid timeouts. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. Present large results (>50 rows) as top 20 by weight with summary stats.',
+          description: 'Query synaptic connectivity between Drosophila neuron classes across ALL connectome datasets simultaneously for comparative connectomics. This is NOT pre-cached — it runs live queries, so expect slow responses (up to several minutes). Set both upstream_type AND downstream_type to filter connections between two specific neuron classes (e.g., "What Tm1→T3 connections exist across all datasets?"). At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections — for pre-computed connections of a single individual neuron, use run_query with NeuronNeuronConnectivityQuery instead. NOT for muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. For both-ends queries, start with weight≥50 to avoid timeouts. RESULT SIZE: a broad query is enormous (a single class at weight=5 can be over 50,000 connections), so results are ranked strongest-first and paged — you get limit rows (default 50) plus a summary computed over ALL of them: totals, per-dataset counts, distinct neuron counts, and the top class pairs. Answer from the summary and quote a handful of rows; only page with offset if the user asks for specific further rows. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. group_by_class=true is usually the better first call on a broad query: it aggregates to class pairs instead of returning every neuron pair.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -293,6 +316,16 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                 type: 'array',
                 items: { type: 'string' },
                 description: 'Dataset symbols to exclude (recommended default: ["hb", "fafb"] to focus on newer datasets). Pass empty array [] to include all datasets. Use list_connectome_datasets to see valid symbols.',
+              },
+              limit: {
+                type: 'number',
+                description: 'How many connection rows to return, strongest first (default 50). The summary always covers every connection found, not just the returned rows. Pass 0 for all rows — only do this on a query you already know is small, as broad queries return tens of thousands.',
+                default: 50,
+              },
+              offset: {
+                type: 'number',
+                description: 'Row to start from within the strongest-first ranking (default 0). Re-running with the same limit and the next offset walks down the list.',
+                default: 0,
               },
             },
           },
@@ -350,7 +383,9 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         case 'run_query':
           return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean });
         case 'search_terms':
-          return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
+          return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; demote_types?: string[]; unique?: boolean; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
+        case 'list_search_facets':
+          return await handleListSearchFacets(args as { contains?: string });
         case 'resolve_entity':
           return await handleResolveEntity(args as { name: string });
         case 'resolve_combination':
@@ -358,7 +393,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         case 'list_connectome_datasets':
           return await handleListConnectomeDatasets();
         case 'query_connectivity':
-          return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[] });
+          return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[]; limit?: number; offset?: number });
         case 'get_hierarchy':
           return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number });
         default:
@@ -602,141 +637,273 @@ async function handleRunQuery(args: { id?: string | string[]; query_type?: strin
   };
 }
 
-async function handleSearchTerms(args: { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean }) {
-  const { query, filter_types, exclude_types, boost_types, start = 0, rows = 150, minimize_results = false, auto_fetch_term_info = false } = args;
-  const baseUrl = 'https://solr.virtualflybrain.org/solr/ontology/select';
+// ---------------------------------------------------------------------------
+// search_terms
+//
+// This used to build its own Solr query — its own fq, its own bq, its own qf —
+// against solr.virtualflybrain.org. That construction was a copy of the
+// website's, made once and then left to drift, and because it skipped the
+// website's refine/sort pass its ordering was never actually the website's
+// either. It now calls VFBquery's /search, which IS the website's search: same
+// filters, same boosts, same comparator. One ranking, one place to fix it.
+// ---------------------------------------------------------------------------
 
-  const fq: string[] = [
-    '(short_form:VFB* OR short_form:FB* OR facets_annotation:DataSet OR facets_annotation:pub) AND NOT short_form:VFBc_*',
-  ];
+// How many candidates /search asks Solr for. 500 is the website's value, and it
+// affects *ranking* rather than page size — the comparator can only promote what
+// was retrieved — so it is not something to shrink for a small page.
+const SEARCH_CANDIDATE_POOL = 500;
 
-  if (filter_types && filter_types.length > 0) {
-    for (const ft of filter_types) {
-      fq.push(`facets_annotation:${ft}`);
-    }
+// null until the first `unique` request answers it. The deployed service
+// silently ignores query params it does not know, so the only way to tell
+// whether it applied `unique` is whether it echoes the flag back; the answer
+// cannot change under a running process.
+let searchUniqueIsServerSide: boolean | null = null;
+
+function dedupeSearchRows(rows: any[]): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const row of rows) {
+    const sf = row?.short_form;
+    // A row with no short_form cannot be proven a duplicate, so it is kept.
+    if (typeof sf !== 'string' || sf === '') { out.push(row); continue; }
+    if (seen.has(sf)) { continue; }
+    seen.add(sf);
+    out.push(row);
+  }
+  return out;
+}
+
+async function fetchSearch(params: URLSearchParams): Promise<any> {
+  const url = `${VFBQUERY_BASE}/search?${params.toString()}`;
+  console.error(`MCP Debug: search ${params.toString()}`);
+  const response = await axios.get(url, { timeout: 120000 });
+  return response.data;
+}
+
+async function handleSearchTerms(args: {
+  query: string;
+  filter_types?: string[];
+  exclude_types?: string[];
+  boost_types?: string[];
+  demote_types?: string[];
+  unique?: boolean;
+  start?: number;
+  rows?: number;
+  minimize_results?: boolean;
+  auto_fetch_term_info?: boolean;
+}) {
+  const { query, filter_types, exclude_types, boost_types, demote_types,
+          minimize_results = false, auto_fetch_term_info = false } = args;
+
+  const start = Math.max(0, Math.trunc(Number(args.start) || 0));
+  const requestedRows = Number.isFinite(Number(args.rows)) && Number(args.rows) > 0
+    ? Math.min(1000, Math.trunc(Number(args.rows)))
+    : 150;
+  const rows = minimize_results ? Math.min(requestedRows, 10) : requestedRows;
+  const wantUnique = args.unique !== false;
+
+  const params = new URLSearchParams({ query });
+  // Grow the pool only when the caller pages past it, so an ordinary request
+  // gets the website's ranking rather than a differently-ranked wider net.
+  const pool = Math.min(1000, Math.max(SEARCH_CANDIDATE_POOL, start + rows));
+  params.set('rows', String(pool));
+  if (filter_types && filter_types.length) { params.set('filter_types', filter_types.join(',')); }
+  if (exclude_types && exclude_types.length) { params.set('exclude_types', exclude_types.join(',')); }
+  if (boost_types && boost_types.length) { params.set('boost_types', boost_types.join(',')); }
+  if (demote_types && demote_types.length) { params.set('demote_types', demote_types.join(',')); }
+  if (wantUnique) { params.set('unique', 'true'); }
+
+  // Truncating server-side keeps the payload small, but only when the server
+  // collapses synonym rows itself; otherwise the rows past the limit are
+  // exactly the ones that would survive de-duplication here.
+  if (!wantUnique || searchUniqueIsServerSide === true) {
+    params.set('limit', String(start + rows));
   }
 
-  if (exclude_types && exclude_types.length > 0) {
-    const excludeClause = exclude_types.map(et => `facets_annotation:${et}`).join(' OR ');
-    fq.push(`NOT (${excludeClause})`);
-  }
-
-  let bq = 'short_form:VFBexp*^10.0 short_form:VFB*^100.0 short_form:FBbt*^100.0 short_form:FBbt_00003982^2 facets_annotation:Deprecated^0.001';
-  if (boost_types && boost_types.length > 0) {
-    const boostClauses = boost_types.map(bt => `facets_annotation:${bt}^1000.0`).join(' ');
-    bq = `${bq} ${boostClauses}`;
-  }
-
-  const params = {
-    q: `${query} OR ${query}* OR *${query}*`,
-    'q.op': 'OR',
-    defType: 'edismax',
-    mm: '45%',
-    qf: 'label^110 synonym^100 label_autosuggest synonym_autosuggest shortform_autosuggest',
-    indent: 'true',
-    fl: 'short_form,label,synonym,id,facets_annotation,unique_facets',
-    start: start.toString(),
-    pf: 'true',
-    fq,
-    rows: Math.min(rows, 1000).toString(), // Cap at 1000 max
-    wt: 'json',
-    bq,
-  };
-
+  let data: any;
   try {
-    const response = await axios.get(baseUrl, { params });
-    let resultData = response.data;
-
-    // Handle minimization and auto-fetch logic
-    if (minimize_results || auto_fetch_term_info) {
-      if (resultData?.response?.docs) {
-        const originalCount = resultData.response.numFound;
-        const queryLower = query.toLowerCase();
-        const isPaginatedRequest = start > 0 || rows !== 150;
-
-        // Check for exact label match first (only for non-paginated requests)
-        let exactMatch = null;
-        if (!isPaginatedRequest) {
-          exactMatch = resultData.response.docs.find((doc: any) =>
-            doc.label?.toLowerCase() === queryLower
-          );
-        }
-
-        let minimizedDocs = resultData.response.docs;
-        let truncationInfo: any = {};
-
-        if (exactMatch) {
-          // If exact match found, return only that one
-          minimizedDocs = [exactMatch];
-          truncationInfo = { exactMatch: true, totalAvailable: originalCount };
-        } else if (minimize_results && !isPaginatedRequest) {
-          // For initial searches without pagination, limit to top 10
-          minimizedDocs = resultData.response.docs.slice(0, 10);
-          truncationInfo = {
-            truncated: originalCount > 10,
-            shown: minimizedDocs.length,
-            totalAvailable: originalCount,
-            canRequestMore: originalCount > 10
-          };
-        } else if (isPaginatedRequest) {
-          // For paginated requests, return all requested results
-          truncationInfo = {
-            paginated: true,
-            requested: rows,
-            returned: minimizedDocs.length,
-            totalAvailable: originalCount
-          };
-        }
-
-        // Keep only essential fields if minimizing
-        if (minimize_results) {
-          minimizedDocs = minimizedDocs.map((doc: any) => ({
-            short_form: doc.short_form,
-            label: doc.label,
-            synonym: Array.isArray(doc.synonym) ? doc.synonym.slice(0, 1) : doc.synonym // Keep only first synonym
-          }));
-        }
-
-        resultData.response.docs = minimizedDocs;
-        resultData.response.numFound = minimizedDocs.length; // Update count
-
-        // Add truncation metadata
-        if (Object.keys(truncationInfo).length > 0) {
-          resultData.response._truncation = truncationInfo;
-        }
-
-        // Auto-fetch term info for exact match
-        if (auto_fetch_term_info && exactMatch) {
-          try {
-            const termInfoResult = await handleGetTermInfo({ id: exactMatch.short_form });
-            if (termInfoResult.content && termInfoResult.content[0]?.text) {
-              resultData._term_info = JSON.parse(termInfoResult.content[0].text);
-            }
-          } catch (termInfoError) {
-            console.error('Error auto-fetching term info:', termInfoError);
-            // Don't fail the search if term info fetch fails
-          }
-        }
+    data = await fetchSearch(params);
+    if (wantUnique) {
+      const echoed = typeof data?.unique === 'boolean';
+      searchUniqueIsServerSide = echoed;
+      if (!echoed && params.has('limit')) {
+        // Deployed VFBquery predates `unique`. Page over the whole ranked list
+        // and collapse it here instead of guessing how far the duplicates run.
+        params.delete('limit');
+        data = await fetchSearch(params);
       }
     }
+  } catch (error: any) {
+    // A 400 from /search carries the reason and, for a misspelled type name,
+    // the suggestions — far more useful to pass through than the status code.
+    const detail = error?.response?.data?.error;
+    if (detail) {
+      return { content: [{ type: 'text', text: `Search rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error searching terms: ${error}` }] };
+  }
 
-    return {
-      content: [
-        {
+  const allRows: any[] = Array.isArray(data?.rows) ? data.rows : [];
+  const serverUnique = data?.unique === true;
+  const collapsed = wantUnique && !serverUnique ? dedupeSearchRows(allRows) : allRows;
+  const haveWholeList = !params.has('limit');
+
+  // `count` is the length of the list the server was paging through, so it
+  // already reflects `unique` when the server applied it.
+  let total: number;
+  if (wantUnique && !serverUnique) {
+    total = collapsed.length;
+  } else {
+    total = typeof data?.count === 'number' ? data.count : collapsed.length;
+  }
+  const distinctTerms = typeof data?.distinct_terms === 'number'
+    ? data.distinct_terms
+    : (haveWholeList ? dedupeSearchRows(allRows).length : undefined);
+  const solrMatches = typeof data?.solr_num_found === 'number' ? data.solr_num_found : undefined;
+
+  // The exact-match shortcut only fires on the first page: pages 2+ are a
+  // caller walking the list, and collapsing that to one row loses their place.
+  const queryLower = String(query || '').trim().toLowerCase();
+  let exactMatch: any = null;
+  if ((minimize_results || auto_fetch_term_info) && start === 0) {
+    exactMatch = collapsed.find((row: any) =>
+      typeof row?.original_label === 'string' && row.original_label.toLowerCase() === queryLower
+    ) || null;
+  }
+
+  let page: any[] = exactMatch ? [exactMatch] : collapsed.slice(start, start + rows);
+  if (minimize_results) {
+    page = page.map((row: any) => ({
+      short_form: row?.short_form,
+      label: row?.label,
+      original_label: row?.original_label,
+    }));
+  }
+
+  const notes: string[] = [];
+  if (exactMatch) {
+    notes.push(`"${query}" is an exact label match, so only that term is shown out of ${total}. Re-run with minimize_results=false and auto_fetch_term_info=false to see the rest.`);
+  } else if (total > start + page.length) {
+    notes.push(`Showing results ${start}-${start + page.length} of ${total}. To see more, re-run with start=${start + rows} (same rows).`);
+  } else if (start > 0) {
+    notes.push(`Showing results ${start}-${start + page.length} of ${total}.`);
+  }
+  if (minimize_results) {
+    notes.push('Only short_form, label and original_label are shown; re-run with minimize_results=false for facets and IDs.');
+  }
+  if (wantUnique && !serverUnique) {
+    notes.push('The deployed VFBquery predates server-side unique, so duplicate synonym rows were collapsed by this MCP server instead. Ranking is unaffected; total counts terms.');
+  }
+  if (solrMatches !== undefined && solrMatches > pool) {
+    notes.push(`Solr matched ${solrMatches} terms but only the top ${pool} were ranked, so this is not an exhaustive list. Narrow the query or add filter_types rather than paging past ${pool}.`);
+  }
+  // Under unique=false, total counts synonym rows while solr_matches counts terms, so
+  // total can exceed solr_matches. Read side by side that looks like a contradiction;
+  // it is just two different units, and saying so is cheaper than the reader guessing.
+  if (!wantUnique && solrMatches !== undefined && total > solrMatches) {
+    notes.push(`total (${total}) counts synonym rows because unique=false, while solr_matches (${solrMatches}) counts terms — ${solrMatches} terms matched under ${total} names between them. Re-run with unique=true (the default) for one row per term.`);
+  }
+  if (page.length === 0) {
+    notes.push('No matches. Try alternative spellings, a synonym, a broader term, or fewer filter_types — an empty result does not mean the entity does not exist in VFB.');
+  }
+
+  const result: Record<string, any> = {
+    query,
+    unique: wantUnique,
+    start,
+    returned: page.length,
+    total,
+  };
+  if (distinctTerms !== undefined) { result.distinct_terms = distinctTerms; }
+  if (solrMatches !== undefined) { result.solr_matches = solrMatches; }
+  result.candidate_pool = pool;
+  if (notes.length) { result._note = notes.join(' '); }
+  result.results = page;
+
+  if (auto_fetch_term_info && exactMatch?.short_form) {
+    try {
+      const termInfoResult = await handleGetTermInfo({ id: exactMatch.short_form });
+      if (termInfoResult.content && termInfoResult.content[0]?.text) {
+        result.term_info = JSON.parse(termInfoResult.content[0].text);
+      }
+    } catch (termInfoError) {
+      // A failed term-info fetch must not fail the search it was bolted onto.
+      console.error('Error auto-fetching term info:', termInfoError);
+    }
+  }
+
+  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+}
+
+// ---------------------------------------------------------------------------
+// list_search_facets
+//
+// The type names search_terms filters by are the index's own annotations, so
+// the only honest source for them is the index. This list is what the tool
+// description used to hardcode: a snapshot, already short of the live
+// vocabulary by roughly half, kept solely as a fallback for services that
+// predate /facets. It is not maintained.
+// ---------------------------------------------------------------------------
+
+const STATIC_FACET_SNAPSHOT: string[] = [
+  'entity', 'anatomy', 'nervous_system', 'individual', 'has_image', 'adult', 'cell', 'neuron',
+  'vfb', 'has_neuron_connectivity', 'nblast', 'visual_system', 'cholinergic', 'class',
+  'secondary_neuron', 'expression_pattern', 'gabaergic', 'expression_pattern_fragment',
+  'glutamatergic', 'feature', 'sensory_neuron', 'neuronbridge', 'deprecated', 'larva',
+  'has_region_connectivity', 'nblastexp', 'gene', 'primary_neuron', 'flycircuit',
+  'mechanosensory_system', 'histaminergic', 'lineage_mbp', 'peptidergic', 'hasscrnaseq',
+  'chemosensory_system', 'split', 'has_subclass', 'olfactory_system', 'dopaminergic', 'fafb',
+  'l1em', 'pub', 'enzyme', 'motor_neuron', 'cluster', 'lineage_6', 'lineage_3', 'serotonergic',
+  'lineage_19', 'lineage_cm3', 'lineage_dm6', 'proprioceptive_system', 'gustatory_system',
+  'sense_organ', 'lineage_mbp4', 'lineage_mbp1', 'lineage_1', 'lineage_mbp2', 'lineage_all1',
+  'lineage_balc', 'lineage_cm4', 'lineage_dm4', 'muscle', 'lineage_13', 'lineage_8',
+  'lineage_mbp3', 'lineage_12', 'lineage_dm1', 'lineage_dpmm1', 'lineage_9', 'lineage_cp2',
+  'lineage_dl1', 'fanc', 'lineage_7', 'lineage_vpnd2', 'lineage_dm3', 'lineage_dpmpm2',
+  'lineage_14', 'lineage_4', 'lineage_blp1', 'lineage_dalv2', 'lineage_eba1', 'lineage_dm2',
+  'lineage_dpmpm1', 'auditory_system', 'lineage_16', 'lineage_blvp1', 'lineage_blav2',
+  'lineage_vlpl2', 'lineage_alad1', 'lineage_bamv3', 'lineage_bld6', 'lineage_vpnd1',
+  'synaptic_neuropil', 'lineage_23', 'lineage_17', 'lineage_10', 'lineage_dplpv', 'lineage_21',
+  'lineage_alv1',
+];
+
+function normaliseFacetName(value: string): string {
+  return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+async function handleListSearchFacets(args: { contains?: string }): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const contains = (args?.contains || '').trim();
+  const params = new URLSearchParams();
+  if (contains) { params.set('contains', contains); }
+  const qs = params.toString();
+  const url = `${VFBQUERY_BASE}/facets${qs ? `?${qs}` : ''}`;
+  console.error(`MCP Debug: list_search_facets contains=${contains || '(none)'}`);
+  try {
+    const response = await axios.get(url, { timeout: 60000 });
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error: any) {
+    const status = error?.response?.status;
+    if (status === 404 || status === 503) {
+      const needle = normaliseFacetName(contains);
+      const names = needle
+        ? STATIC_FACET_SNAPSHOT.filter((n) => normaliseFacetName(n).includes(needle))
+        : STATIC_FACET_SNAPSHOT;
+      return {
+        content: [{
           type: 'text',
-          text: JSON.stringify(resultData, null, 2),
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error searching terms: ${error}`,
-        },
-      ],
-    };
+          text: JSON.stringify({
+            source: 'static snapshot bundled with this MCP server',
+            _note: status === 404
+              ? 'The deployed VFBquery does not serve /facets yet, so this is a stale snapshot of about 100 names rather than the live vocabulary of over 200, and it has no term counts. Names outside it may still be valid: search_terms will tell you if one is not.'
+              : 'The live type-name vocabulary is temporarily unavailable, so this is a stale bundled snapshot. Search itself still works.',
+            count: names.length,
+            total: STATIC_FACET_SNAPSHOT.length,
+            contains: contains || null,
+            facets: names.map((name) => ({ name })),
+          }, null, 2),
+        }],
+      };
+    }
+    return { content: [{ type: 'text', text: `Error listing search facets: ${error}` }] };
   }
 }
 
@@ -831,12 +998,155 @@ async function handleListConnectomeDatasets(): Promise<{ content: Array<{ type: 
   }
 }
 
+// /query_connectivity has no paging of its own and returns every row it finds:
+// a single class at weight=5 is over 50,000 connections, which is not something
+// to hand an LLM whole. These shape it into a strongest-first page plus a
+// summary computed over the full set, so the numbers stay true even though the
+// rows are truncated.
+
+const CONNECTIVITY_WEIGHT_KEYS = ['weight', 'total_weight', 'pairwise_connections'];
+const CONNECTIVITY_DEFAULT_LIMIT = 50;
+const CONNECTIVITY_TOP_PAIRS = 10;
+
+function connectivityWeightKey(rows: any[]): string | null {
+  for (const key of CONNECTIVITY_WEIGHT_KEYS) {
+    if (rows.some((row) => row && typeof row[key] === 'number')) { return key; }
+  }
+  return null;
+}
+
+// Class labels come out of Neo4j as apoc.text.join(collect(distinct c.label),'|'),
+// and the order inside that join is not deterministic — the same logical pair of
+// classes comes back as "A|B" on one row and "B|A" on the next. Left alone that
+// splits one class pair across several summary entries and inflates
+// distinct_class_pairs. Sorting the parts gives one stable spelling per set.
+function canonicaliseClassLabel(value: any): any {
+  if (typeof value !== 'string' || !value.includes('|')) { return value; }
+  return value
+    .split('|')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .sort()
+    .join('|');
+}
+
+function summariseConnectivity(rows: any[], weightKey: string | null): Record<string, any> {
+  const summary: Record<string, any> = { connections: rows.length };
+
+  if (weightKey) {
+    let total = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    let counted = 0;
+    for (const row of rows) {
+      const w = row?.[weightKey];
+      if (typeof w !== 'number') { continue; }
+      total += w;
+      if (w < min) { min = w; }
+      if (w > max) { max = w; }
+      counted++;
+    }
+    if (counted > 0) {
+      summary[weightKey] = { min, max, total, mean: Math.round((total / counted) * 10) / 10 };
+    }
+  }
+
+  const datasets: Record<string, number> = {};
+  for (const row of rows) {
+    const ds = row?.up_data_source || row?.down_data_source;
+    if (typeof ds === 'string' && ds) { datasets[ds] = (datasets[ds] || 0) + 1; }
+  }
+  if (Object.keys(datasets).length) { summary.by_dataset = datasets; }
+
+  const pairs = new Map<string, { upstream_class: any; downstream_class: any; connections: number; weight: number }>();
+  for (const row of rows) {
+    if (!row || (row.upstream_class === undefined && row.downstream_class === undefined)) { continue; }
+    const up = canonicaliseClassLabel(row.upstream_class);
+    const down = canonicaliseClassLabel(row.downstream_class);
+    const key = JSON.stringify([up, down]);
+    let entry = pairs.get(key);
+    if (!entry) {
+      entry = { upstream_class: up, downstream_class: down, connections: 0, weight: 0 };
+      pairs.set(key, entry);
+    }
+    entry.connections++;
+    const w = weightKey ? row[weightKey] : undefined;
+    if (typeof w === 'number') { entry.weight += w; }
+  }
+  if (pairs.size) {
+    summary.distinct_class_pairs = pairs.size;
+    summary.top_class_pairs = [...pairs.values()]
+      .sort((a, b) => (b.weight - a.weight) || (b.connections - a.connections))
+      .slice(0, CONNECTIVITY_TOP_PAIRS);
+  }
+
+  const upstream = new Set<any>();
+  const downstream = new Set<any>();
+  for (const row of rows) {
+    if (row?.upstream_neuron_id) { upstream.add(row.upstream_neuron_id); }
+    if (row?.downstream_neuron_id) { downstream.add(row.downstream_neuron_id); }
+  }
+  if (upstream.size) { summary.distinct_upstream_neurons = upstream.size; }
+  if (downstream.size) { summary.distinct_downstream_neurons = downstream.size; }
+
+  return summary;
+}
+
+function shapeConnectivityResult(data: any, ctx: { limit: number; offset: number }): any {
+  if (!data || !Array.isArray(data.connections)) { return data; }
+  const all: any[] = data.connections;
+  const total = typeof data.count === 'number' ? data.count : all.length;
+  const weightKey = connectivityWeightKey(all);
+
+  // Per-neuron rows arrive in Cypher's order, which is not ranked, so a
+  // truncated page of them would be arbitrary. Sorting by weight makes the
+  // first page the interesting end; class-aggregated rows are already ordered
+  // this way, so for those it changes nothing. Index carried as a tiebreak to
+  // keep the sort stable.
+  const ranked = weightKey
+    ? all
+        .map((row, i): [any, number] => [row, i])
+        .sort((a, b) => {
+          const wa = typeof a[0]?.[weightKey] === 'number' ? a[0][weightKey] : -Infinity;
+          const wb = typeof b[0]?.[weightKey] === 'number' ? b[0][weightKey] : -Infinity;
+          return (wb - wa) || (a[1] - b[1]);
+        })
+        .map(([row]) => row)
+    : all;
+
+  const page = ctx.limit > 0 ? ranked.slice(ctx.offset, ctx.offset + ctx.limit) : ranked.slice(ctx.offset);
+
+  const notes: string[] = [];
+  if (total > ctx.offset + page.length) {
+    const nextOffset = ctx.offset + (ctx.limit > 0 ? ctx.limit : page.length);
+    notes.push(`Showing connections ${ctx.offset}-${ctx.offset + page.length} of ${total}, ranked by ${weightKey || "the endpoint's own order"} (strongest first). The summary covers ALL ${total} connections, not just this page, so answer from it rather than from the rows shown. To see further rows, re-run with offset=${nextOffset} (same limit).`);
+  } else if (ctx.offset > 0) {
+    notes.push(`Showing connections ${ctx.offset}-${ctx.offset + page.length} of ${total}.`);
+  }
+
+  const shaped: Record<string, any> = {
+    count: total,
+    offset: ctx.offset,
+    limit: ctx.limit,
+    returned: page.length,
+    ranked_by: weightKey,
+    summary: summariseConnectivity(all, weightKey),
+  };
+  if (notes.length) { shaped._note = notes.join(' '); }
+  if (Array.isArray(data.warnings) && data.warnings.length) { shaped.warnings = data.warnings; }
+  if (data.resolved !== undefined) { shaped.resolved = data.resolved; }
+  shaped.connections = page;
+  return shaped;
+}
+
 async function handleQueryConnectivity(args: {
   upstream_type?: string;
   downstream_type?: string;
   weight?: number;
   group_by_class?: boolean;
   exclude_dbs?: string[];
+  limit?: number;
+  offset?: number;
 }): Promise<{ content: Array<{ type: string; text: string }> }> {
   const params = new URLSearchParams();
   if (args.upstream_type) params.set('upstream_type', args.upstream_type);
@@ -844,12 +1154,29 @@ async function handleQueryConnectivity(args: {
   if (args.weight !== undefined) params.set('weight', String(args.weight));
   if (args.group_by_class !== undefined) params.set('group_by_class', String(args.group_by_class));
   if (args.exclude_dbs) params.set('exclude_dbs', args.exclude_dbs.join(','));
+  // limit/offset are applied here, not sent: the endpoint has no paging.
+  const limit = Number.isFinite(Number(args.limit)) && Number(args.limit) >= 0
+    ? Math.trunc(Number(args.limit))
+    : CONNECTIVITY_DEFAULT_LIMIT;
+  const offset = Number.isFinite(Number(args.offset)) && Number(args.offset) > 0
+    ? Math.trunc(Number(args.offset))
+    : 0;
   const url = `${VFBQUERY_BASE}/query_connectivity?${params.toString()}`;
-  console.error(`MCP Debug: query_connectivity params=${params.toString()}`);
+  console.error(`MCP Debug: query_connectivity params=${params.toString()} limit=${limit} offset=${offset}`);
   try {
     const response = await axios.get(url, { timeout: 300000 }); // 5 min — live cross-dataset query
-    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+    return { content: [{ type: 'text', text: JSON.stringify(shapeConnectivityResult(response.data, { limit, offset }), null, 2) }] };
   } catch (error) {
+    // The endpoint explains its own rejections ("At least one of upstream_type or
+    // downstream_type required", an unresolvable class label). Passing the bare
+    // AxiosError up just says "400" and leaves the caller guessing, so surface
+    // the body — it usually tells the caller exactly what to change.
+    const detail = (error as any)?.response?.data?.error
+      ?? (error as any)?.response?.data?.detail
+      ?? (typeof (error as any)?.response?.data === 'string' ? (error as any).response.data : null);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Connectivity query rejected: ${detail}` }] };
+    }
     return { content: [{ type: 'text', text: `Error querying connectivity: ${error}` }] };
   }
 }
@@ -1062,11 +1389,13 @@ function getHtmlPage(): string {
   <ul>
     <li><code>get_term_info</code> - Get term information from VirtualFlyBrain using a VFB ID</li>
     <li><code>run_query</code> - Run a query on VirtualFlyBrain using a VFB ID and query type</li>
-    <li><code>search_terms</code> - Search for VFB terms using the Solr search server with filtering options</li>
+    <li><code>search_terms</code> - Search VFB terms with the website's own ranking, plus type filters, boosts and demotions</li>
+    <li><code>list_search_facets</code> - List the type names <code>search_terms</code> can filter, exclude, boost or demote by, with term counts</li>
     <li><code>resolve_entity</code> - Resolve an unresolved query string (e.g., P{VT054895-GAL4.DBD} or a driver line / cell type label) to VFB/FlyBase IDs and metadata</li>
     <li><code>resolve_combination</code> - Resolve an unresolved split-GAL4 combination name or synonym to its underlying IDs</li>
     <li><code>list_connectome_datasets</code> - List available connectome datasets (e.g., Hemibrain, FAFB)</li>
-    <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters</li>
+    <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters, paged with summary statistics</li>
+    <li><code>get_hierarchy</code> - Build a <code>part_of</code> or <code>subclass_of</code> hierarchy tree for a VFB term</li>
   </ul>
 
   <h2>🧠 About VirtualFlyBrain</h2>

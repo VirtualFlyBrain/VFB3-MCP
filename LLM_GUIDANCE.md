@@ -62,17 +62,21 @@ Naming a real ID that you have not seen in a tool result this conversation count
 
 ## Search Filter Cookbook
 
-Unfiltered `search_terms` calls return deprecated terms, scRNAseq artifacts, and unrelated entity types mixed in with what the user wants. Use `filter_types` from the start. Common recipes:
+`search_terms` runs the search virtualflybrain.org itself runs — the same Solr query, the same filters and boosts, the same final sort — so what you get back is what a user would see on the site. Deprecated terms are already excluded server-side, so you do not need to ask for that.
 
-| User asks about | `filter_types` | `exclude_types` |
-|---|---|---|
-| Neuron types/classes | `["neuron", "class"]` | `["deprecated"]` |
-| Individual neurons (with images) | `["neuron", "has_image"]` | `["deprecated"]` |
-| Neurons with connectome data | `["neuron", "has_neuron_connectivity"]` | `["deprecated"]` |
-| Brain regions / neuropils | `["anatomy"]` | `["deprecated"]` |
-| Genes | `["gene"]` | `["deprecated"]` |
-| Expression patterns / driver lines | `["expression_pattern"]` | `["deprecated"]` |
-| Datasets | `["dataset"]` | — |
+Unfiltered calls still mix scRNAseq artifacts and unrelated entity types in with what the user wants. Use `filter_types` from the start. Common recipes:
+
+| User asks about | `filter_types` |
+|---|---|
+| Neuron types/classes | `["neuron", "class"]` |
+| Individual neurons (with images) | `["neuron", "has_image"]` |
+| Neurons with connectome data | `["neuron", "has_neuron_connectivity"]` |
+| Brain regions / neuropils | `["anatomy"]` |
+| Genes | `["gene"]` |
+| Expression patterns / driver lines | `["expression_pattern"]` |
+| Datasets | `["dataset"]` |
+
+**Do not guess type names.** There are over 200 of them and they change as data is added. Call `list_search_facets` — optionally with `contains` to narrow, e.g. `contains: "neuron"` — and use what it returns. An unknown name is rejected outright, with suggestions.
 
 **Stage filtering — only when the user is specific.** VFB covers adult, larval, and embryonic data, and many anatomical FBbt terms are stage-agnostic (the "antennal lobe" class covers all life stages). Do NOT add `"adult"` by default — you will hide the generic class and any larval/embryonic results.
 
@@ -83,8 +87,12 @@ Unfiltered `search_terms` calls return deprecated terms, scRNAseq artifacts, and
 Other useful options on `search_terms`:
 
 - `boost_types: ["has_image", "has_neuron_connectivity"]` — soft-ranks the most data-rich entities first without excluding others.
+- `demote_types: [...]` — the mirror image: sinks matches to the bottom of the ranking without excluding them. Prefer this to `exclude_types` when you suspect the user might still want the demoted results, just not first. A type listed in both `boost_types` and `demote_types` is treated as boosted.
+- `unique: false` — one row per matching *synonym* instead of one per term. Use it when the useful question is "which name matched?", and expect the same ID to repeat. The default (`true`) gives one row per term.
 - `minimize_results: true` — limits to top 10 and adds truncation metadata. Use for exploratory searches to avoid filling context with irrelevant matches.
-- `auto_fetch_term_info: true` — when an exact label match is found, folds `get_term_info` into the same response, saving a round trip.
+- `auto_fetch_term_info: true` — when the query matches one term's name exactly, folds `get_term_info` into the same response, saving a round trip.
+
+**Reading the counts.** The response reports them separately and they mean different things: `returned` is how many rows you were given, `total` is the length of the ranked list they came from, `distinct_terms` is how many distinct terms matched, and `solr_matches` is how many terms Solr matched before ranking. Under `unique: false` the rows are synonyms, so `total` counts names and can exceed `solr_matches`, which counts terms — the `_note` spells that out when it happens. If `solr_matches` is much larger than `candidate_pool`, only the top slice was ranked. Never report `returned` as if it were the number of matches.
 
 ---
 
@@ -181,17 +189,19 @@ Returns tabular data from pre-computed analyses:
 
 ### **Search Results Response (`search_terms`)**
 
-Returns entity search results from SOLR. Supports optional type-based filtering and result control:
+Runs the website's own search. Parameters:
 
 - **`filter_types`**: Hard include — results must have ALL specified `facets_annotation` values (AND logic)
 - **`exclude_types`**: Hard exclude — results must NOT have any of these types
 - **`boost_types`**: Soft boost — results with these types rank higher without excluding others
-- **`start`**: Pagination start index (default 0)
-- **`rows`**: Number of results to return (default 150, max 1000)
-- **`minimize_results`**: When true, limits results and adds truncation metadata for reduced context
-- **`auto_fetch_term_info`**: When true and exact match found, includes term info in response
+- **`demote_types`**: Soft demote — results with these types rank lower without being excluded. A type in both `boost_types` and `demote_types` is boosted
+- **`unique`**: One row per term (default `true`). `false` gives one row per matching synonym
+- **`start`**: Page start index (default 0)
+- **`rows`**: Rows to return (default 150, max 1000)
+- **`minimize_results`**: Return only the top 10, with reduced fields, for a first look
+- **`auto_fetch_term_info`**: When the query matches one term's name exactly, include that term's info
 
-Available filter types are loaded dynamically from Solr at server startup, so the tool description always lists current values.
+Call `list_search_facets` for valid type names — do not guess them, and do not rely on any list embedded in documentation, which will drift.
 
 **Basic search:**
 ```json
@@ -200,22 +210,27 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 }
 ```
 
-**Filtered search (only adult neurons with images):**
+**Filtered search (adult neurons with images):**
 ```json
 {
   "query": "medulla",
-  "filter_types": ["neuron", "adult", "has_image"],
-  "exclude_types": ["deprecated"]
+  "filter_types": ["neuron", "adult", "has_image"]
 }
 ```
 
-**Minimized search with pagination:**
+**One row per synonym, to see which name matched:**
+```json
+{
+  "query": "Kenyon cell",
+  "unique": false
+}
+```
+
+**Minimized first look, then paging:**
 ```json
 {
   "query": "medulla",
-  "minimize_results": true,
-  "start": 0,
-  "rows": 20
+  "minimize_results": true
 }
 ```
 
@@ -230,41 +245,51 @@ Available filter types are loaded dynamically from Solr at server startup, so th
 **Response:**
 ```json
 {
-  "response": {
-    "numFound": 1234,
-    "docs": [
-      {
-        "short_form": "FBbt_00007484",
-        "label": "antennal lobe",
-        "synonym": ["antennal lobe"],
-        "id": "http://purl.obolibrary.org/obo/FBbt_00007484",
-        "facets_annotation": ["Adult", "Nervous_system"],
-        "unique_facets": ["adult antennal lobe", "nervous system"]
-      }
-    ],
-    "_truncation": {
-      "truncated": true,
-      "shown": 10,
-      "totalAvailable": 1234,
-      "canRequestMore": true
+  "query": "antennal lobe",
+  "unique": true,
+  "start": 0,
+  "returned": 3,
+  "total": 438,
+  "distinct_terms": 438,
+  "solr_matches": 438,
+  "candidate_pool": 500,
+  "_note": "Showing results 0-3 of 438. To see more, re-run with start=3 (same rows).",
+  "results": [
+    {
+      "label": "antennal lobe cPIN (antennal lobe commissural pioneer interneuron)",
+      "original_label": "antennal lobe commissural pioneer interneuron",
+      "short_form": "FBbt_00052563",
+      "id": "http://purl.obolibrary.org/obo/FBbt_00052563",
+      "facets_annotation": ["Entity", "Class", "Neuron", "Anatomy", "Cell", "Nervous_system", "has_subClass"],
+      "unique_facets": ["Nervous_system", "Neuron"]
     }
-  },
-  "_term_info": {
-    "Id": "FBbt_00007484",
-    "Name": "antennal lobe",
-    "Types": ["Class"],
-    "Definition": "The antennal lobe..."
-  }
+  ],
+  "term_info": { "Id": "FBbt_00003924", "Name": "antennal lobe" }
 }
 ```
 
 **Key Fields:**
-- **short_form**: VFB/FlyBase identifier
-- **label**: Primary display name
-- **facets_annotation**: Categorization tags (also used for filtering)
-- **id**: Full ontology IRI
-- **_truncation**: Metadata when `minimize_results=true` indicating if results were limited
-- **_term_info**: Automatically fetched term details when `auto_fetch_term_info=true` and exact match found
+- **short_form**: VFB/FlyBase identifier — use this for `get_term_info`, `run_query`, and URLs
+- **label**: The site's display form, which is not the plain name. It is either `"name (ID)"` or `"matched synonym (name)"`, so it tells you *why* the row matched
+- **original_label**: The plain name. Compare against this, not `label`, when checking whether a result is what the user asked for
+- **facets_annotation**: Categorisation tags, and the vocabulary the four type filters draw on
+- **returned / total / distinct_terms / solr_matches**: Four different numbers — rows given to you, length of the ranked list, distinct terms matched, and terms Solr matched before ranking. Report the right one; `returned` is never the answer to "how many are there?"
+- **candidate_pool**: How many documents Solr was asked for before ranking. If `solr_matches` exceeds it, the list is not exhaustive — narrow the query or add `filter_types` rather than paging to the end
+- **_note**: Says what was truncated, collapsed, or approximated. Read it before summarising
+- **term_info**: Present when `auto_fetch_term_info` was set and the query matched one term's name exactly
+
+### **Facet Vocabulary Response (`list_search_facets`)**
+
+```json
+{
+  "count": 12,
+  "total": 233,
+  "contains": "neuron",
+  "facets": [{ "name": "Neuron", "docs": 48213 }]
+}
+```
+
+`docs` is how many documents carry that facet, which is a useful sanity check: a facet with a handful of documents will not usefully narrow a search. If the response carries a `source` of `"static snapshot bundled with this MCP server"`, the live vocabulary was unreachable and you are seeing a stale list — a name missing from it may still be valid.
 
 ## FlyBase Entity Resolution & Stocks Workflow
 
@@ -478,6 +503,12 @@ run_query(id="VFB_00104glj", query_type="NeuronInputsTo")
 
 5. **Execute** — Call `query_connectivity` with confirmed parameters.
 
+**Reading a paged connectivity result.** `query_connectivity` returns a strongest-first page of `limit` rows (default 50) plus a `summary` computed over **every** connection found, not just the page. Answer from the summary; quote a handful of rows as illustration. A single class at `weight=5` can find over 50,000 connections, so the page you see is often a tiny fraction — `count` is the real total, `returned` is what you were given, and the `_note` says so explicitly. Only page with `offset` if the user asks for specific further rows; if they want the shape of the whole result set, `group_by_class=true` is the better move.
+
+The summary contains: total `connections`, the weight column's `min`/`max`/`total`/`mean`, `by_dataset` counts, `distinct_class_pairs`, `distinct_upstream_neurons`, `distinct_downstream_neurons`, and `top_class_pairs` ranked by connection count. That is usually a better answer to "how do these two classes connect?" than any 50 rows would be.
+
+Note that a class label may be several names joined with `|` — a neuron that is both `adult GABAergic neuron` and `proximal medullary amacrine neuron Pm2` appears as `"adult GABAergic neuron|proximal medullary amacrine neuron Pm2"`. That is one class set, not two classes; when presenting it to a user, the most specific name in the set is usually the one they want.
+
 **Performance rules for `query_connectivity`:**
 - Always start with the default `weight = 5`. There is no universal "good" weight — it varies by cell type.
 - Single-end queries (only upstream or only downstream set) are **slower** than both-ends queries because they return more results. If the user only cares about one direction, prefer `DownstreamClassConnectivity` or `UpstreamClassConnectivity` via `run_query` instead — they are pre-indexed and fast.
@@ -505,6 +536,8 @@ Results: 142 connections across 28 upstream neurons → 85 downstream neurons
 **Result formatting:**
 - **≤50 rows:** Show full table.
 - **>50 rows:** Show top 20 sorted by weight descending. Include summary stats (total connections, unique partners, weight range). Note that results are truncated.
+
+For `query_connectivity` the summary stats are already computed for you over the full result set — use those figures rather than deriving them from the rows in front of you, which are only a page.
 
 **Column guide by query type:**
 
@@ -705,8 +738,9 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 ### **1. Start with Search**
 - Use `search_terms` to find relevant entities
 - Use `filter_types` to narrow results by entity type (e.g., `["neuron"]`, `["gene"]`, `["expression_pattern"]`)
-- Use `exclude_types` to remove unwanted results (e.g., `["deprecated"]`)
-- Use `boost_types` to prioritize results with useful data (e.g., `["has_image", "has_neuron_connectivity"]`)
+- Use `list_search_facets` to find valid type names instead of guessing them
+- Use `exclude_types` to remove unwanted result types (deprecated terms are already excluded server-side)
+- Use `boost_types` to prioritize results with useful data (e.g., `["has_image", "has_neuron_connectivity"]`), and `demote_types` to push a type down without hiding it
 - For large result sets, use `minimize_results: true` to limit to top 10 and reduce context usage
 - For exact term matches, use `auto_fetch_term_info: true` to get immediate detailed information
 - Use `start` and `rows` for pagination when exploring large result sets
@@ -774,13 +808,14 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - Cell type hierarchy: Search with `filter_types: ["neuron", "class"]` → `get_hierarchy` with `relationship: "subclass_of"`
 - Datasets: Search with `filter_types: ["dataset"]` to find available datasets
 - Exact term lookup: Use `auto_fetch_term_info: true` for immediate detailed information on exact matches
-- Exclude noise: Always consider `exclude_types: ["deprecated"]` to remove obsolete entities
+- Facet names: Call `list_search_facets` rather than guessing type names — there are over 200 and they change
 
 ### **Error Handling**
 
 See also: Rules 2 and 3 at the top of this document.
 
-- If `search_terms` returns no good matches, try alternative spellings, synonyms, broader terms, or different `filter_types` from the cookbook.
+- If `search_terms` returns no good matches, try alternative spellings, synonyms, broader terms, or different `filter_types` from the cookbook. Setting `unique: false` can help here — it shows which synonym matched, which often explains a surprising result.
+- If `search_terms` or `query_connectivity` returns a rejection message, read it: an unknown facet name comes back with suggested alternatives, and a connectivity rejection names the missing or unresolvable parameter. Fix the call from the message rather than retrying it unchanged.
 - If `run_query` fails or returns empty, call `get_term_info` on the ID and pick a different `query_type` from the `Queries` array. The error message will list the valid query_types — use them.
 - If no MCP call answers the question, tell the user clearly what you tried and what you found. Do **not** fall back to training-data answers (no fabricated FBbt/FBgn/FBst IDs, driver names, citations, or numbers).
 - Network timeouts: suggest retrying. `query_connectivity` is the only slow tool — others should respond in seconds.

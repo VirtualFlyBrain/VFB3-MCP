@@ -53,11 +53,44 @@ This file contains examples of how to use the VFB3-MCP server tools.
     "arguments": {
       "query": "medulla",
       "filter_types": ["neuron", "adult"],
-      "exclude_types": ["deprecated"]
+      "boost_types": ["has_image"]
     }
   }
 }
 ```
+
+Deprecated terms are already excluded server-side, so there is no need to list them in
+`exclude_types`. Get valid type names from `list_search_facets` rather than guessing.
+
+### 4b. List Valid Facet Type Names
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "list_search_facets",
+    "arguments": {
+      "contains": "neuron"
+    }
+  }
+}
+```
+
+### 4c. One Row Per Matching Synonym
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "search_terms",
+    "arguments": {
+      "query": "Kenyon cell",
+      "unique": false
+    }
+  }
+}
+```
+
+Useful when you need to know *which* name matched. The same `short_form` will repeat
+across rows; the default `unique: true` gives one row per term instead.
 
 ### 5. Search Terms with Minimization
 ```json
@@ -160,15 +193,42 @@ This file contains examples of how to use the VFB3-MCP server tools.
   "params": {
     "name": "query_connectivity",
     "arguments": {
-      "upstream_type": "FBbt_00000001",
-      "downstream_type": "FBbt_00000002",
+      "upstream_type": "FBbt_00003789",
+      "downstream_type": "FBbt_00047727",
       "weight": 5,
       "group_by_class": true,
-      "exclude_dbs": ["hemibrain"]
+      "exclude_dbs": ["hb", "fafb"]
     }
   }
 }
 ```
+
+Tm1 → T3 across every connectome dataset except Hemibrain and FAFB. At least one of
+`upstream_type` / `downstream_type` is required, and `exclude_dbs` takes dataset
+*symbols* (`hb`, `fafb`) — see `list_connectome_datasets` for the valid set.
+
+Results come back as a strongest-first page plus a `summary` computed over every
+connection found, so `count` is the true total and `returned` is only what you were
+given. Broad queries find tens of thousands of connections.
+
+### 12b. Paging Through Connectivity Results
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "query_connectivity",
+    "arguments": {
+      "upstream_type": "FBbt_00003789",
+      "weight": 50,
+      "limit": 25,
+      "offset": 25
+    }
+  }
+}
+```
+
+Rows 25–50 of the strongest-first ranking. The `summary` is identical on every page
+because it always covers the full result set — answer from it rather than from the rows.
 
 ### 13. Get Ontology Hierarchy
 
