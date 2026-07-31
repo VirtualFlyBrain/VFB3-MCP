@@ -172,7 +172,16 @@ The server integrates with VirtualFlyBrain APIs:
 
 - **Term Info API**: `https://v3-cached.virtualflybrain.org/get_term_info`
 - **Query API**: `https://v3-cached.virtualflybrain.org/run_query`
-- **Solr Search API**: `https://solr.virtualflybrain.org/solr/ontology/select`
+- **Search API**: `https://v3-cached.virtualflybrain.org/search`
+- **Facet vocabulary API**: `https://v3-cached.virtualflybrain.org/facets`
+- **Connectivity API**: `https://v3-cached.virtualflybrain.org/query_connectivity`
+
+The server no longer talks to `solr.virtualflybrain.org` directly. It used to build
+its own Solr query for search — its own `fq`, its own `bq`, its own `qf` — and that
+construction was a copy of the website's, made once and then left to drift. Worse,
+it skipped the website's refine/sort pass, so its ordering was never the website's
+either. VFBquery's `/search` *is* the website's search, so search now goes through
+it: one ranking, one place to fix it.
 
 ### MCP Tools Implementation
 
@@ -187,14 +196,65 @@ The server integrates with VirtualFlyBrain APIs:
 - **API Call**: GET `run_query` with `offset`/`limit`
 
 #### search_terms
-- **Input**: Search query with optional filters, pagination, and result control parameters
-- **Output**: Search results with optional truncation metadata and auto-fetched term info
-- **API Call**: GET to Solr search endpoint with enhanced parameter handling
+- **Input**: Search query with optional `filter_types` / `exclude_types` / `boost_types` / `demote_types`, `unique`, `start`, `rows`, `minimize_results`, `auto_fetch_term_info`
+- **Output**: `{query, unique, start, returned, total, distinct_terms?, solr_matches?, candidate_pool, _note?, results, term_info?}`. The counts are reported separately rather than collapsed into one number, so a truncated page cannot be mistaken for a small result set
+- **API Call**: GET `/search`
+
+Two details of `/search` shape the implementation:
+
+- **`rows` on the wire is a candidate pool, not a page size.** It is how many documents
+  Solr is asked for before ranking, so it affects *which* results come back, not just
+  how many. The tool therefore sends `rows = min(1000, max(500, start + rows))` — an
+  ordinary request gets the website's own 500-candidate pool and identical ranking, and
+  only a caller paging past that widens the net. `/search` has no `offset`, so the page
+  slice is taken client-side.
+- **`original_label` is the raw label; `label` is the refined display form**
+  (`"medulla (FBbt_00003748)"`, `"synonym (label)"`). Exact-match detection compares
+  `original_label` — comparing the display form, as the old code did, could never match.
+
+`unique` and `distinct_terms` are newer than some deployed VFBquery versions. Rather
+than version-sniffing, the tool asks for `unique=true` and treats "did the response
+echo `unique`?" as the capability probe, caching the answer for the process. Where the
+server does not honour it, the tool refetches *without* `limit` and de-duplicates
+locally — necessary because the rows past the limit are exactly the ones that survive
+de-duplication — and says so in `_note`.
+
+#### list_search_facets
+- **Input**: optional `contains` substring
+- **Output**: `{count, total, contains?, source?, _note?, facets}`
+- **API Call**: GET `/facets`
+
+On `404` (endpoint not deployed yet) or `503` (vocabulary unavailable) this falls back
+to `STATIC_FACET_SNAPSHOT`, a snapshot of the names that used to be pasted into the
+`search_terms` description. The snapshot is not maintained; the response labels its
+source and warns that names missing from it may still be valid.
+
+#### query_connectivity
+- **Input**: `upstream_type` / `downstream_type` (at least one required), `weight`, `group_by_class`, `exclude_dbs`, `limit`, `offset`
+- **Output**: `{count, offset, limit, returned, ranked_by, summary, _note?, warnings?, resolved?, connections}`
+- **API Call**: GET `/query_connectivity`, 5-minute timeout (live cross-dataset query, not cached)
+
+`/query_connectivity` has no paging of its own and returns every row it finds — a single
+class at `weight=5` can be over 50,000 connections, which is not something to hand a
+model whole. `limit`/`offset` are therefore applied client-side after ranking
+strongest-first (stable, with the original index as tiebreak), and the `summary` is
+computed over the **full** set so the totals remain true.
+
+One subtlety in the summary: class labels arrive from Neo4j as
+`apoc.text.join(collect(distinct c.label),'|')`, and the order within that join is not
+deterministic — the same logical pair of classes comes back as `"A|B"` on one row and
+`"B|A"` on the next. Left alone that splits one class pair across several summary rows
+and inflates `distinct_class_pairs`. The parts are sorted before keying, which gives one
+stable spelling per label set.
 
 ### Error Handling
 
 - Axios HTTP client with timeout configuration
-- Graceful fallback for API unavailability
+- Graceful fallback for API unavailability, including capability probing rather than
+  version sniffing where a newer VFBquery adds a parameter or an endpoint
+- Rejection bodies from `/search` and `/query_connectivity` are surfaced to the caller
+  rather than reduced to a status code — both endpoints explain what to change (an
+  unknown facet name comes back with suggestions), and that explanation is the useful part
 - Structured error responses following MCP protocol
 - Logging for debugging and monitoring
 
