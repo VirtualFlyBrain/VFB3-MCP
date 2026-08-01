@@ -133,6 +133,11 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                 ],
                 description: 'One or more VFB IDs to look up',
               },
+              verbose: {
+                type: 'boolean',
+                description: 'Return the raw response. By default the Queries entries are trimmed to query/label/preview_columns/output_format (dropping argument schemas and empty preview blocks) and image entries to id/label/thumbnail, which roughly halves the payload without losing anything you need to call run_query. Set true if you need the argument schemas or the nrrd/wlz/obj/swc file URLs.',
+                default: false,
+              },
             },
             required: ['id'],
           },
@@ -356,6 +361,11 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                 description: 'Number of levels to expand. 1 = direct children/parents only. Higher values go deeper. -1 = full tree (use with caution on broad terms). Default: 1.',
                 default: 1,
               },
+              include_html: {
+                type: 'boolean',
+                description: 'Include the HTML rendering of the tree. Off by default: it is the VFB site\'s ROI-browser markup for the same tree already returned in descendants/ancestors, and it is typically three quarters of the response. Set true only if you are embedding the site rendering.',
+                default: false,
+              },
             },
             required: ['id', 'relationship'],
           },
@@ -379,7 +389,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
     try {
       switch (name) {
         case 'get_term_info':
-          return await handleGetTermInfo(args as { id: string | string[] });
+          return await handleGetTermInfo(args as { id: string | string[]; verbose?: boolean });
         case 'run_query':
           return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean });
         case 'search_terms':
@@ -395,7 +405,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         case 'query_connectivity':
           return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[]; limit?: number; offset?: number });
         case 'get_hierarchy':
-          return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number });
+          return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number; include_html?: boolean });
         default:
           console.error('MCP Debug: Unknown tool requested:', name);
           throw new McpError(
@@ -407,7 +417,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
       console.error('MCP Debug: Error calling tool', name, ':', error);
       throw new McpError(
         ErrorCode.InternalError,
-        `Error calling tool ${name}: ${error}`
+        failureText(`Error calling tool ${name}`, error)
       );
     }
   });
@@ -426,12 +436,114 @@ async function fetchSingleTermInfo(id: string): Promise<{ data?: any; error?: st
     return { data: response.data };
   } catch (error) {
     console.error(`MCP Debug: Error fetching term info for id=${id}:`, error);
-    return { error: `Error fetching term info for "${id}": ${error}` };
+    return { error: failureText(`Error fetching term info for "${id}"`, error) };
   }
 }
 
-async function handleGetTermInfo(args: { id: string | string[] }) {
+// ---------------------------------------------------------------------------
+// Payload shaping
+//
+// Both get_term_info and get_hierarchy answer with responses built for the VFB
+// website rather than for a model: term info repeats every query's column
+// headers twice around an empty preview, and lists six file URLs per image that
+// differ only in filename; a hierarchy carries an HTML rendering of the same
+// tree it already returned as data, plus a `display_full` string that is
+// usually byte-identical to `display`. That scaffolding crowds out the answer.
+// Both shapers are lossless in the sense that matters: the omitted parts are
+// either reconstructible from what remains or one flag away (`verbose` /
+// `include_html`).
+// ---------------------------------------------------------------------------
+
+/** Per-image file URLs that all sit beside the thumbnail and are named below. */
+const IMAGE_FILE_URL_KEYS = ['thumbnail_transparent', 'nrrd', 'wlz', 'obj', 'swc'];
+
+const IMAGE_TRIM_NOTE = 'Image entries keep id/label/thumbnail. The other files sit in the '
+  + 'same directory as the thumbnail: thumbnailT.png (transparent), volume.nrrd, volume.wlz, '
+  + 'volume_man.obj, volume.swc. Pass verbose=true for the untrimmed response.';
+
+const QUERY_TRIM_NOTE = 'Queries entries keep query/label/preview_columns/output_format. The '
+  + 'argument schema and the empty preview block are omitted; the query name is all run_query '
+  + 'needs. Pass verbose=true for the untrimmed response.';
+
+function trimImageEntry(entry: any): any {
+  if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+  const out: any = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (IMAGE_FILE_URL_KEYS.includes(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function trimQueryEntry(query: any): any {
+  if (query == null || typeof query !== 'object' || Array.isArray(query)) return query;
+  const out: any = {};
+  for (const key of ['query', 'label', 'preview_columns', 'output_format']) {
+    if (query[key] !== undefined) out[key] = query[key];
+  }
+  // count is -1 when the server did not compute one; a real total is worth keeping.
+  if (typeof query.count === 'number' && query.count >= 0) out.count = query.count;
+  // A preview with rows in it is real data. An empty one is just the headers again.
+  const rows = query?.preview_results?.rows;
+  if (Array.isArray(rows) && rows.length > 0) out.preview_results = query.preview_results;
+  return out;
+}
+
+function shapeTermInfo(data: any, verbose: boolean): any {
+  if (verbose) return data;
+  if (data == null || typeof data !== 'object' || Array.isArray(data)) return data;
+  const out: any = { ...data };
+  const notes: string[] = [];
+
+  if (Array.isArray(out.Queries) && out.Queries.length > 0) {
+    out.Queries = out.Queries.map(trimQueryEntry);
+    notes.push(QUERY_TRIM_NOTE);
+  }
+
+  let trimmedAnyImage = false;
+  for (const key of ['Images', 'Examples']) {
+    const group = out[key];
+    if (!group || typeof group !== 'object' || Array.isArray(group)) continue;
+    const shaped: Record<string, any> = {};
+    for (const [templateId, list] of Object.entries(group)) {
+      if (Array.isArray(list)) {
+        shaped[templateId] = list.map(trimImageEntry);
+        if (list.length > 0) trimmedAnyImage = true;
+      } else {
+        shaped[templateId] = list;
+      }
+    }
+    out[key] = shaped;
+  }
+  if (trimmedAnyImage) notes.push(IMAGE_TRIM_NOTE);
+
+  if (notes.length > 0) out.trimmed = notes.join(' ');
+  return out;
+}
+
+function shapeHierarchy(data: any, includeHtml: boolean): any {
+  if (data == null || typeof data !== 'object' || Array.isArray(data)) return data;
+  const out: any = { ...data };
+  const notes: string[] = [];
+
+  // `html` is the VFB site's ROI-browser rendering of the tree already present
+  // in `descendants`/`ancestors` -- typically three quarters of the response.
+  if (!includeHtml && typeof out.html === 'string') {
+    delete out.html;
+    notes.push('An HTML rendering of this same tree was omitted; pass include_html=true for it.');
+  }
+  // `display_full` is only interesting when it differs from `display`.
+  if (typeof out.display_full === 'string' && out.display_full === out.display) {
+    delete out.display_full;
+    notes.push('display_full was byte-identical to display and was dropped.');
+  }
+  if (notes.length > 0) out.trimmed = notes.join(' ');
+  return out;
+}
+
+async function handleGetTermInfo(args: { id: string | string[]; verbose?: boolean }) {
   const { id } = args;
+  const verbose = args.verbose === true;
 
   // Single ID — preserve original response format
   if (typeof id === 'string') {
@@ -440,7 +552,7 @@ async function handleGetTermInfo(args: { id: string | string[] }) {
       content: [
         {
           type: 'text',
-          text: result.error || JSON.stringify(result.data, null, 2),
+          text: result.error || JSON.stringify(shapeTermInfo(result.data, verbose), null, 2),
         },
       ],
     };
@@ -455,7 +567,7 @@ async function handleGetTermInfo(args: { id: string | string[] }) {
 
   const keyed: Record<string, any> = {};
   for (const r of results) {
-    keyed[r.id] = r.error ? { error: r.error } : r.data;
+    keyed[r.id] = r.error ? { error: r.error } : shapeTermInfo(r.data, verbose);
   }
 
   return {
@@ -480,8 +592,12 @@ async function fetchAvailableQueryTypes(id: string): Promise<string[] | null> {
     const result = await fetchSingleTermInfo(id);
     if (!result.data) return null;
     const queries = result.data.Queries;
-    if (Array.isArray(queries)) return queries;
-    return null;
+    if (!Array.isArray(queries)) return null;
+    // Each entry is an object ({query, label, takes, preview, ...}), not a name.
+    // Returning it raw made the error path JSON.stringify the whole schema.
+    return queries
+      .map((q: any) => (typeof q === 'string' ? q : q?.query))
+      .filter((q: any): q is string => typeof q === 'string' && q.length > 0);
   } catch {
     return null;
   }
@@ -489,7 +605,7 @@ async function fetchAvailableQueryTypes(id: string): Promise<string[] | null> {
 
 function formatAvailableQueriesHint(id: string, queries: string[] | null): string {
   if (queries && queries.length > 0) {
-    return `\n\nAvailable query_types for "${id}" (from get_term_info Queries array): ${JSON.stringify(queries)}\nPick one of these for run_query, or call get_term_info("${id}") for full details.`;
+    return `\n\nAvailable query_types for "${id}" (from get_term_info Queries array): ${queries.join(', ')}\nPick one of these for run_query, or call get_term_info("${id}") for full details.`;
   }
   if (queries && queries.length === 0) {
     return `\n\nget_term_info("${id}") reports no available queries for this entity. The ID may be deprecated, the entity may not support pre-computed queries, or you may need to query a related entity (e.g. its parent class via get_hierarchy).`;
@@ -571,7 +687,7 @@ async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: 
     return { data: shapeRunQueryResult(response.data, { includeImages, limit, offset }) };
   } catch (error) {
     console.error(`MCP Debug: Error running query id=${id} query_type=${query_type}:`, error);
-    return { error: `Error running query "${query_type}" on "${id}": ${error}` };
+    return { error: failureText(`Error running query "${query_type}" on "${id}"`, error) };
   }
 }
 
@@ -689,10 +805,50 @@ function dedupeSearchRows(rows: any[]): any[] {
 // AxiosError up says only "status code 400", which tells the caller nothing about
 // what to change.
 function rejectionDetail(error: any): string | null {
+  // A timeout is not a rejection and has no body, but it is the failure a caller
+  // is most likely to misread as "no data". The server keeps computing after we
+  // give up and caches the result, so retrying is the right advice.
+  const code = error?.code;
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+    return 'the request took longer than this client will wait. VFBquery is still '
+      + 'computing it and will cache the result, so retrying the same call shortly '
+      + 'will usually return it quickly. This does NOT mean there is no data.';
+  }
+
   const data = error?.response?.data;
   if (data == null) return null;
   if (typeof data === 'string') return data.trim() || null;
-  return data.error ?? data.detail ?? null;
+
+  const base = data.error ?? data.detail ?? null;
+  if (base == null) return null;
+
+  // VFBquery answers some rejections with the valid alternatives -- an unknown
+  // query_type comes back with every name it would have accepted. Dropping that
+  // forces the caller to guess again.
+  // The server's own sentence rarely ends in punctuation, and running it
+  // straight into "Valid values:" reads as one broken sentence.
+  const head = String(base).trim();
+  const parts = [/[.!?]$/.test(head) ? head : `${head}.`];
+  if (Array.isArray(data.available) && data.available.length) {
+    parts.push(`Valid values: ${data.available.join(', ')}.`);
+  }
+  if (Array.isArray(data.suggestions) && data.suggestions.length) {
+    parts.push(`Did you mean: ${data.suggestions.join(', ')}?`);
+  }
+  if (data.status === 'computing') {
+    parts.push('The result is still being computed and will be cached — retry shortly.');
+  }
+  return parts.join(' ');
+}
+
+/** Uniform "we could not do it, and here is exactly why" text for any failure. */
+function failureText(context: string, error: any): string {
+  const detail = rejectionDetail(error);
+  const status = error?.response?.status;
+  if (detail) {
+    return status ? `${context}: ${detail} (HTTP ${status})` : `${context}: ${detail}`;
+  }
+  return `${context}: ${error}`;
 }
 
 async function fetchSearch(params: URLSearchParams): Promise<any> {
@@ -758,11 +914,7 @@ async function handleSearchTerms(args: {
   } catch (error: any) {
     // A 400 from /search carries the reason and, for a misspelled type name,
     // the suggestions — far more useful to pass through than the status code.
-    const detail = error?.response?.data?.error;
-    if (detail) {
-      return { content: [{ type: 'text', text: `Search rejected: ${detail}` }] };
-    }
-    return { content: [{ type: 'text', text: `Error searching terms: ${error}` }] };
+    return { content: [{ type: 'text', text: failureText('Search rejected', error) }] };
   }
 
   const allRows: any[] = Array.isArray(data?.rows) ? data.rows : [];
@@ -925,7 +1077,7 @@ async function handleListSearchFacets(args: { contains?: string }): Promise<{ co
         }],
       };
     }
-    return { content: [{ type: 'text', text: `Error listing search facets: ${error}` }] };
+    return { content: [{ type: 'text', text: failureText('Error listing search facets', error) }] };
   }
 }
 
@@ -972,7 +1124,7 @@ async function handleResolveEntity(args: { name: string }): Promise<{ content: A
     const response = await axios.get(url);
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
-    return { content: [{ type: 'text', text: `Error resolving entity "${rawName}": ${error}` }] };
+    return { content: [{ type: 'text', text: failureText(`Error resolving entity "${rawName}"`, error) }] };
   }
 }
 
@@ -1004,7 +1156,7 @@ async function handleResolveCombination(args: { name: string }): Promise<{ conte
     const response = await axios.get(url);
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
-    return { content: [{ type: 'text', text: `Error resolving combination "${rawName}": ${error}` }] };
+    return { content: [{ type: 'text', text: failureText(`Error resolving combination "${rawName}"`, error) }] };
   }
 }
 
@@ -1016,7 +1168,7 @@ async function handleListConnectomeDatasets(): Promise<{ content: Array<{ type: 
     const response = await axios.get(url);
     return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
   } catch (error) {
-    return { content: [{ type: 'text', text: `Error listing connectome datasets: ${error}` }] };
+    return { content: [{ type: 'text', text: failureText('Error listing connectome datasets', error) }] };
   }
 }
 
@@ -1189,11 +1341,7 @@ async function handleQueryConnectivity(args: {
     const response = await axios.get(url, { timeout: 300000 }); // 5 min — live cross-dataset query
     return { content: [{ type: 'text', text: JSON.stringify(shapeConnectivityResult(response.data, { limit, offset }), null, 2) }] };
   } catch (error) {
-    const detail = rejectionDetail(error);
-    if (detail) {
-      return { content: [{ type: 'text', text: `Connectivity query rejected: ${detail}` }] };
-    }
-    return { content: [{ type: 'text', text: `Error querying connectivity: ${error}` }] };
+    return { content: [{ type: 'text', text: failureText('Connectivity query rejected', error) }] };
   }
 }
 
@@ -1202,6 +1350,7 @@ async function handleGetHierarchy(args: {
   relationship: string;
   direction?: string;
   max_depth?: number;
+  include_html?: boolean;
 }): Promise<{ content: Array<{ type: string; text: string }> }> {
   const params = new URLSearchParams();
   params.set('id', args.id);
@@ -1215,13 +1364,10 @@ async function handleGetHierarchy(args: {
   console.error(`MCP Debug: get_hierarchy params=${params.toString()}`);
   try {
     const response = await axios.get(url, { timeout: 120000 }); // 2 min
-    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+    const shaped = shapeHierarchy(response.data, args.include_html === true);
+    return { content: [{ type: 'text', text: JSON.stringify(shaped, null, 2) }] };
   } catch (error) {
-    const detail = rejectionDetail(error);
-    if (detail) {
-      return { content: [{ type: 'text', text: `Hierarchy request rejected: ${detail}` }] };
-    }
-    return { content: [{ type: 'text', text: `Error getting hierarchy: ${error}` }] };
+    return { content: [{ type: 'text', text: failureText('Hierarchy request rejected', error) }] };
   }
 }
 

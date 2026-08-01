@@ -1,12 +1,13 @@
 {
   "name": "vfb3-mcp",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "MCP server for VirtualFlyBrain API integration",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
+    "dev": "tsc && node dist/index.js",
+    "test:live": "node test/live-smoke.js"
   },
   "repository": {
     "type": "git",

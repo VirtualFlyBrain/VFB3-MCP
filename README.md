@@ -273,7 +273,10 @@ docker run -p 3000:3000 virtualflybrain/vfb3-mcp:latest
 Retrieve detailed information about VFB terms using their IDs.
 
 **Parameters:**
-- `id` (string): VFB ID (e.g., "VFB_jrcv0i43")
+- `id` (string or array): One or more VFB IDs (e.g., "VFB_jrcv0i43"); an array is fetched in parallel and returned keyed by ID
+- `verbose` (boolean, optional): Return the raw response (default false)
+
+By default the response is trimmed, which roughly halves it. Each `Queries` entry keeps `query`, `label`, `preview_columns` and `output_format`; its argument schema (`takes`) and its `preview_results` block are dropped when that block has no rows, since it otherwise just repeats `preview_columns`. Each image entry keeps `id`, `label` and `thumbnail`; the other five file URLs are dropped, and the response says where they are — same directory as the thumbnail, named `thumbnailT.png`, `volume.nrrd`, `volume.wlz`, `volume_man.obj`, `volume.swc`. Nothing here is a guess about what you need: pass `verbose: true` and you get the untouched response.
 
 ### run_query
 Execute predefined queries on VFB data.
@@ -312,6 +315,18 @@ List the valid `facets_annotation` type names for the four type filters above, r
 - `contains` (string, optional): Case- and separator-insensitive substring filter (e.g., "neuron", "nervous system")
 
 If the deployed VFBquery predates the `/facets` endpoint, this falls back to a snapshot bundled with the server and says so — names absent from a snapshot result may still be valid.
+
+### get_hierarchy
+Traverse the ontology hierarchy for a VFB term.
+
+**Parameters:**
+- `id` (string): VFB term ID (e.g., "FBbt_00005801")
+- `relationship` (string): `part_of` for region/tissue structure, `subclass_of` for cell-type taxonomy
+- `direction` (string, optional): `descendants`, `ancestors`, or `both` (default `both`)
+- `max_depth` (number, optional): Levels to expand (default 1; `-1` for the full tree)
+- `include_html` (boolean, optional): Include the HTML rendering (default false)
+
+The endpoint returns the tree three times over: as data in `descendants`/`ancestors`, as a `display` string, and as an `html` document written for the VFB site's ROI browser — with `display_full` usually byte-identical to `display`. By default the `html` is omitted and `display_full` is dropped when it duplicates `display`, which takes a typical response from ~4.3 KB to ~1.4 KB. Pass `include_html: true` if you are embedding the site rendering.
 
 ### query_connectivity
 Query synaptic connectivity between neuron classes across all connectome datasets. At least one of `upstream_type` or `downstream_type` is required. Results are ranked strongest-first and paged: you get `limit` rows plus a `summary` computed over **every** connection found — weight min/max/total/mean, per-dataset counts, distinct neuron counts, and the top class pairs — so the totals stay true even though the rows are truncated. A broad query can find tens of thousands of connections, which is why paging is on by default.

@@ -617,6 +617,8 @@ After showing the text tree, offer the user an interactive HTML version they can
 https://v3-cached.virtualflybrain.org/get_hierarchy_html?id=<ID>&relationship=<RELATIONSHIP>&direction=<DIRECTION>&max_depth=<DEPTH>
 ```
 
+The `get_hierarchy` tool itself omits that HTML by default — it is a second copy of the tree you already have in `descendants`/`ancestors`, and it is usually three quarters of the response. Pass `include_html: true` if you actually intend to render it.
+
 For example: `https://v3-cached.virtualflybrain.org/get_hierarchy_html?id=FBbt_00003686&relationship=subclass_of&direction=both&max_depth=2`
 
 The HTML page has a collapsible interactive tree with clickable links to VFB for every term.

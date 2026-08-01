@@ -186,9 +186,9 @@ it: one ranking, one place to fix it.
 ### MCP Tools Implementation
 
 #### get_term_info
-- **Input**: VFB ID string
-- **Output**: Term metadata, classifications, images, publications
-- **API Call**: POST to term info endpoint
+- **Input**: VFB ID string or array of IDs; optional `verbose`
+- **Output**: Term metadata, classifications, images, publications. Trimmed by default (empty query previews, query argument schemas and the non-thumbnail image file URLs are removed, and a `trimmed` field says what went and how to get it back) — about half the bytes. `verbose: true` returns the response untouched
+- **API Call**: GET `get_term_info`
 
 #### run_query
 - **Input**: VFB ID(s) and query type; optional `limit`/`offset` (paging) and `include_images`
