@@ -132,6 +132,9 @@ npm install
 # Build TypeScript
 npm run build
 
+# Unit tests (compiles first, then runs tests/*.test.js against dist/)
+npm test
+
 # Start production server
 npm start
 
@@ -141,6 +144,8 @@ npm run dev
 # HTTP mode for testing
 MCP_MODE=http PORT=3000 node dist/index.js
 ```
+
+Importing `dist/index.js` starts a server as a module side effect, so nothing defined in it is reachable from a test process. Logic worth unit testing therefore lives in its own module — currently `src/runQueryShape.ts`, which holds the `/run_query` response shaping and its count semantics — and `index.ts` imports it. Put new pure logic in a sibling module for the same reason.
 
 ### Local Testing
 
@@ -192,7 +197,7 @@ it: one ranking, one place to fix it.
 
 #### run_query
 - **Input**: VFB ID(s) and query type; optional `limit`/`offset` (paging) and `include_images`
-- **Output**: A page of tabular data (default 25 rows) with `headers`, `rows`, the true total `count`, and paging metadata (`offset`/`limit`/`returned`/`_note`). The `thumbnail` column is excluded unless `include_images` is set. FlyBase `FindStocks` / `FindComboPublications` are query_types here.
+- **Output**: A page of tabular data (default 25 rows) with `headers`, `rows`, the true total `count`, a `count_status` (`exact` | `row_count` | `unavailable`) qualifying it, and paging metadata (`offset`/`limit`/`returned`/`_note`). VFBquery signals an upstream Owlery failure as HTTP 200 with `count: -1` and no rows; that is surfaced as `count_status: "unavailable"` with an explicit `_note`, and retried once behind the scenes with `X-Force-Refresh` so a failure cached by nginx cannot be served as an answer. Top-level flags from VFBquery (`capped`, `truncated`, `warnings`) are passed through rather than dropped. The `thumbnail` column is excluded unless `include_images` is set. FlyBase `FindStocks` / `FindComboPublications` are query_types here.
 - **API Call**: GET `run_query` with `offset`/`limit`
 
 #### search_terms

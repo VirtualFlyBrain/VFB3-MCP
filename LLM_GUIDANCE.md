@@ -162,6 +162,7 @@ Returns tabular data from pre-computed analyses:
 ```json
 {
   "count": 1,
+  "count_status": "exact",
   "offset": 0,
   "limit": 25,
   "returned": 1,
@@ -182,9 +183,11 @@ Returns tabular data from pre-computed analyses:
 ```
 
 **Interpretation:**
-- **count**: The TRUE total number of results — may be far larger than the rows returned.
+- **count**: The TRUE total number of results — may be far larger than the rows returned. Read `count_status` before quoting it.
+- **count_status**: `exact` — `count` is the true total, quote it freely. `row_count` — no total was supplied, so `count` is just how many rows came back. `unavailable` — the query FAILED upstream and `count` is `-1`. A failed query is **not** an empty result: never report it as "0", "none" or "no results". Say the query could not be run, and read `_note`, which explains the failure and the retry.
 - **offset / limit / returned**: Paging state. Only the current page (default 25 rows) is returned; to get the next page re-run with `offset` increased by `limit`.
-- **_note**: Present when rows were paged and/or images excluded — states how to page further and how to re-add images (`include_images: true`).
+- **_note**: Present when the query failed, when rows were paged, when the result was truncated, and/or when images were excluded — states what happened and how to page further or re-add images (`include_images: true`). Read it before summarising.
+- **capped / truncated / warnings**: Passed through from VFBquery when present. `truncated` means the server holds only the first part of the result set, so `count` is the true total but the far pages cannot be reached.
 - **Headers / Rows**: Column definitions and the current page of data. The `thumbnail` column is EXCLUDED by default; pass `include_images: true` to include it.
 
 ### **Search Results Response (`search_terms`)**
