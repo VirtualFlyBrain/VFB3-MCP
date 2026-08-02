@@ -274,6 +274,7 @@ Retrieve detailed information about VFB terms using their IDs.
 
 **Parameters:**
 - `id` (string): VFB ID (e.g., "VFB_jrcv0i43")
+- `force_refresh` (boolean, optional): Bypass the response cache and recompute (see `run_query` below for the cost and the whitelisting caveat)
 
 ### run_query
 Execute predefined queries on VFB data.
@@ -285,6 +286,9 @@ Execute predefined queries on VFB data.
 - `limit` (number, optional): Max rows per call (default 25). The true total is always returned as `count`; use 0 for all rows (still capped ~25000)
 - `offset` (number, optional): Row offset for paging (default 0); re-run with `offset += limit` for the next page
 - `include_images` (boolean, optional): Include the `thumbnail` column (default false — it is stripped to save space, and the response `_note` says how to re-add it)
+- `force_refresh` (boolean, optional): Bypass the response cache and recompute. Expensive; intended only as a one-shot retry of a call that returned a stale or failed result. A failed query is already retried once automatically. Requires the server's egress IP to be whitelisted on v3-cached — from a non-whitelisted host nginx ignores the header and serves the cached entry unchanged.
+
+The response reports `count_status` alongside `count`: `exact` (count is the true total), `row_count` (no total supplied — count is just the rows returned), or `unavailable` (the query failed upstream and count is `-1`). A `-1` is an error indication, **not** an empty result set, and `_note` says so in words.
 
 FlyBase stocks and split-GAL4 combination publications are run_query query_types too: `FindStocks` and `FindComboPublications`.
 

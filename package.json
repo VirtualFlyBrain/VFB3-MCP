@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
+    "dev": "tsc && node dist/index.js",
+    "test": "tsc && node --test tests/*.test.js"
   },
   "repository": {
     "type": "git",

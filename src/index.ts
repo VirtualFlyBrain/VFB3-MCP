@@ -11,6 +11,7 @@ import axios from 'axios';
 import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
+import { shapeRunQueryResult, runQueryFailed } from './runQueryShape.js';
 
 // Version is single-sourced from package.json so a release tag (forced into
 // package.json by CI before the build) flows straight into serverInfo.
@@ -133,13 +134,17 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                 ],
                 description: 'One or more VFB IDs to look up',
               },
+              force_refresh: {
+                type: 'boolean',
+                description: 'Bypass the response cache and recompute this result. Expensive — leave it unset on a first call. Set it ONLY to re-try a call that, earlier in this same conversation, returned a result that was clearly wrong, stale, or reported as failed. Never set it on more than one retry of the same call.',
+              },
             },
             required: ['id'],
           },
         },
         {
           name: 'run_query',
-          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type". Results are PAGED: the first 25 rows by default (change with limit/offset) plus the true total as "count". Image/thumbnail columns are excluded by default to save space - pass include_images=true to include them. FlyBase integration is via query_types too: FindStocks (fly stocks for a FlyBase feature ID - FBgn/FBal/FBti/FBtp/FBco/FBst) and FindComboPublications (publications for an FBco split-GAL4 combination). Get those IDs from resolve_entity / resolve_combination first, then run_query with the ID and the query_type. Include FlyBase links in output: https://flybase.org/reports/{ID}.',
+          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type". Results are PAGED: the first 25 rows by default (change with limit/offset) plus the true total as "count". ALWAYS read "count_status" before quoting "count": "exact" means count is the true total; "unavailable" means the query FAILED upstream and count is -1, which is NOT zero and must never be reported as "no results" — read "_note" and tell the user the query could not be run. Image/thumbnail columns are excluded by default to save space - pass include_images=true to include them. FlyBase integration is via query_types too: FindStocks (fly stocks for a FlyBase feature ID - FBgn/FBal/FBti/FBtp/FBco/FBst) and FindComboPublications (publications for an FBco split-GAL4 combination). Get those IDs from resolve_entity / resolve_combination first, then run_query with the ID and the query_type. Include FlyBase links in output: https://flybase.org/reports/{ID}.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -177,6 +182,10 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               include_images: {
                 type: 'boolean',
                 description: 'Include the image/thumbnail column in result rows. Default false: the thumbnail is a long markdown image string that is rarely useful to reason over and greatly inflates every row, so it is stripped and the response says so in _note. Set true to include it (e.g. to build image URLs).',
+              },
+              force_refresh: {
+                type: 'boolean',
+                description: 'Bypass the response cache and recompute this result. Expensive — leave it unset on a first call. Set it ONLY to re-try a call that, earlier in this same conversation, returned a result that was clearly wrong, stale, or reported as failed. Never set it on more than one retry of the same call. A failed query (count -1) is already retried once automatically, so you do not need this for that case.',
               },
             },
           },
@@ -379,9 +388,9 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
     try {
       switch (name) {
         case 'get_term_info':
-          return await handleGetTermInfo(args as { id: string | string[] });
+          return await handleGetTermInfo(args as { id: string | string[]; force_refresh?: boolean });
         case 'run_query':
-          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean });
+          return await handleRunQuery(args as { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean; force_refresh?: boolean });
         case 'search_terms':
           return await handleSearchTerms(args as { query: string; filter_types?: string[]; exclude_types?: string[]; boost_types?: string[]; demote_types?: string[]; unique?: boolean; start?: number; rows?: number; minimize_results?: boolean; auto_fetch_term_info?: boolean });
         case 'list_search_facets':
@@ -413,11 +422,60 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
   });
 }
 
-async function fetchSingleTermInfo(id: string): Promise<{ data?: any; error?: string }> {
+// v3-cached is an nginx cache in front of VFBquery. Its cache key is
+// "$request_method$request_uri", so adding a query parameter does NOT refresh
+// the entry a normal call reads — it writes a different slot and leaves the
+// canonical one stale. The only mechanism that refreshes the entry the service
+// actually serves is the X-Force-Refresh request header:
+//
+//   * nginx (owl_cache nginx.conf.template) maps it to proxy_cache_bypass, so
+//     the request reaches VFBquery and the fresh response is written back into
+//     the canonical slot;
+//   * VFBquery then honours the same header itself (ha_api.py
+//     `_force_refresh_requested`) and skips its own SOLR cache.
+//
+// This matters beyond staleness: VFBquery answers an upstream Owlery failure
+// with HTTP 200 and count -1, and nginx caches 200s for months. A single
+// transient failure can therefore be served as a "result" long after the
+// service recovered. Forcing a refresh is what heals that slot.
+//
+// IMPORTANT DEPLOYMENT DEPENDENCY: nginx only honours the header from a
+// whitelisted client IP (`map "$is_whitelisted_ip:$http_x_force_refresh"`).
+// From a non-whitelisted host the header is silently ignored and the cached
+// entry is served unchanged — the call still succeeds, it just does nothing.
+// So this MCP's egress IP must be on v3-cached's whitelist for force_refresh
+// to have any effect. `logCacheStatus` below makes a non-whitelisted
+// deployment visible in the logs instead of leaving it as a silent no-op.
+//
+// A forced call is expensive — it bypasses the cache and recomputes — so it is
+// used sparingly: once, automatically, only after a failed result, or when a
+// caller explicitly asks for it.
+const FORCE_REFRESH_HEADERS = { 'X-Force-Refresh': 'true' } as const;
+
+function requestConfig(forceRefresh?: boolean) {
+  return forceRefresh ? { headers: { ...FORCE_REFRESH_HEADERS } } : undefined;
+}
+
+/** Report whether a force-refreshed call actually bypassed the cache. A HIT
+ *  means nginx ignored the header, which in practice means this host is not
+ *  whitelisted — worth saying out loud once per occurrence rather than leaving
+ *  operators to wonder why forcing a refresh changes nothing. */
+function logCacheStatus(response: any, what: string): void {
+  const status = response?.headers?.['x-cache-status'];
+  if (!status) { return; }
+  if (String(status).toUpperCase() === 'HIT') {
+    console.error(`MCP Debug: force-refresh for ${what} returned X-Cache-Status: HIT — the cache did NOT recompute. This host is probably not whitelisted for X-Force-Refresh on v3-cached.`);
+  } else {
+    console.error(`MCP Debug: force-refresh for ${what} returned X-Cache-Status: ${status}`);
+  }
+}
+
+async function fetchSingleTermInfo(id: string, opts: { forceRefresh?: boolean } = {}): Promise<{ data?: any; error?: string }> {
   const url = `https://v3-cached.virtualflybrain.org/get_term_info?id=${id}`;
-  console.error(`MCP Debug: Fetching term info for id=${id}`);
+  console.error(`MCP Debug: Fetching term info for id=${id}${opts.forceRefresh ? ' (force_refresh)' : ''}`);
   try {
-    const response = await axios.get(url);
+    const response = await axios.get(url, requestConfig(opts.forceRefresh));
+    if (opts.forceRefresh) { logCacheStatus(response, `get_term_info id=${id}`); }
     if (response.data === null || response.data === undefined) {
       console.error(`MCP Debug: No term info found for id=${id}`);
       return { error: `No term info found for ID "${id}". This ID may not exist, may be deprecated, or may not yet be indexed in the term info API. Try using the search_terms tool to verify the ID exists.` };
@@ -430,12 +488,13 @@ async function fetchSingleTermInfo(id: string): Promise<{ data?: any; error?: st
   }
 }
 
-async function handleGetTermInfo(args: { id: string | string[] }) {
-  const { id } = args;
+async function handleGetTermInfo(args: { id: string | string[]; force_refresh?: boolean }) {
+  const { id, force_refresh } = args;
+  const opts = { forceRefresh: force_refresh === true };
 
   // Single ID — preserve original response format
   if (typeof id === 'string') {
-    const result = await fetchSingleTermInfo(id);
+    const result = await fetchSingleTermInfo(id, opts);
     return {
       content: [
         {
@@ -449,7 +508,7 @@ async function handleGetTermInfo(args: { id: string | string[] }) {
   // Batch IDs — run in parallel, return keyed object
   const ids = id;
   const results = await Promise.all(ids.map(async (singleId) => {
-    const result = await fetchSingleTermInfo(singleId);
+    const result = await fetchSingleTermInfo(singleId, opts);
     return { id: singleId, ...result };
   }));
 
@@ -497,45 +556,7 @@ function formatAvailableQueriesHint(id: string, queries: string[] | null): strin
   return `\n\nCould not retrieve the Queries array for "${id}". Call get_term_info("${id}") to verify the ID exists and to see its available query_types.`;
 }
 
-const RUN_QUERY_IMAGE_COLUMNS = ['thumbnail', 'thumbnail_transparent'];
-
-function shapeRunQueryResult(data: any, ctx: { includeImages: boolean; limit: number; offset: number }): any {
-  if (!data || !Array.isArray(data.rows)) { return data; }
-  const total = typeof data.count === 'number' ? data.count : data.rows.length;
-  let rows: any[] = data.rows;
-  let headers = data.headers;
-  let imagesExcluded = false;
-  if (!ctx.includeImages) {
-    rows = rows.map((r) => {
-      if (r && typeof r === 'object' && !Array.isArray(r)) {
-        const c: Record<string, any> = { ...r };
-        for (const k of RUN_QUERY_IMAGE_COLUMNS) { if (k in c) { delete c[k]; imagesExcluded = true; } }
-        return c;
-      }
-      return r;
-    });
-    if (headers && typeof headers === 'object') {
-      headers = { ...headers };
-      for (const k of RUN_QUERY_IMAGE_COLUMNS) { if (k in headers) { delete headers[k]; } }
-    }
-  }
-  const returned = rows.length;
-  const notes: string[] = [];
-  if (imagesExcluded) { notes.push('Image columns (thumbnail) were excluded to reduce size - re-run this query with include_images=true to include them.'); }
-  if (total > ctx.offset + returned) {
-    const nextOffset = ctx.offset + (ctx.limit > 0 ? ctx.limit : returned);
-    notes.push(`Showing rows ${ctx.offset}-${ctx.offset + returned} of ${total}. To see more, re-run with offset=${nextOffset} (same limit).`);
-  } else if (ctx.offset > 0) {
-    notes.push(`Showing rows ${ctx.offset}-${ctx.offset + returned} of ${total}.`);
-  }
-  const shaped: Record<string, any> = { count: total, offset: ctx.offset, limit: ctx.limit, returned };
-  if (notes.length) { shaped._note = notes.join(' '); }
-  shaped.headers = headers;
-  shaped.rows = rows;
-  return shaped;
-}
-
-async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: number; offset?: number; includeImages?: boolean } = {}): Promise<{ data?: any; error?: string; redirect?: string }> {
+async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: number; offset?: number; includeImages?: boolean; forceRefresh?: boolean } = {}): Promise<{ data?: any; error?: string; redirect?: string }> {
   // If the LLM accidentally passes a tool name as query_type, redirect
   if (query_type === 'get_term_info') {
     return { redirect: `Note: "get_term_info" is a separate tool, not a query_type for run_query. Use the get_term_info tool directly next time.` };
@@ -550,9 +571,25 @@ async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: 
   const params = new URLSearchParams({ id, query_type });
   if (limit > 0) { params.set('offset', String(offset)); params.set('limit', String(limit)); }
   const url = `https://v3-cached.virtualflybrain.org/run_query?${params.toString()}`;
-  console.error(`MCP Debug: Running query id=${id} query_type=${query_type} limit=${limit} offset=${offset} includeImages=${includeImages}`);
+  console.error(`MCP Debug: Running query id=${id} query_type=${query_type} limit=${limit} offset=${offset} includeImages=${includeImages}${opts.forceRefresh ? ' (force_refresh)' : ''}`);
   try {
-    const response = await axios.get(url);
+    let response = await axios.get(url, requestConfig(opts.forceRefresh));
+    if (opts.forceRefresh) { logCacheStatus(response, `run_query id=${id} query_type=${query_type}`); }
+    // count -1 is an upstream failure, and nginx will have cached it with a
+    // 200. Retry exactly once past the cache so a stale failed slot cannot be
+    // served as an answer for months. Capped at one retry: if the service is
+    // genuinely down, hammering it makes things worse, and the shaped result
+    // says plainly that the query failed.
+    if (!opts.forceRefresh && runQueryFailed(response.data)) {
+      console.error(`MCP Debug: count -1 for id=${id} query_type=${query_type} — retrying once with X-Force-Refresh`);
+      try {
+        const retry = await axios.get(url, requestConfig(true));
+        logCacheStatus(retry, `run_query id=${id} query_type=${query_type}`);
+        if (retry.data !== null && retry.data !== undefined) { response = retry; }
+      } catch (retryError) {
+        console.error(`MCP Debug: force-refresh retry failed for id=${id} query_type=${query_type}:`, retryError);
+      }
+    }
     if (response.data === null || response.data === undefined) {
       console.error(`MCP Debug: No results for query id=${id} query_type=${query_type}`);
       const available = await fetchAvailableQueryTypes(id);
@@ -575,9 +612,9 @@ async function fetchSingleQuery(id: string, query_type: string, opts: { limit?: 
   }
 }
 
-async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean }) {
-  const { id, query_type, queries, limit, offset, include_images } = args;
-  const opts = { limit, offset, includeImages: include_images };
+async function handleRunQuery(args: { id?: string | string[]; query_type?: string; queries?: Array<{ id: string; query_type: string }>; limit?: number; offset?: number; include_images?: boolean; force_refresh?: boolean }) {
+  const { id, query_type, queries, limit, offset, include_images, force_refresh } = args;
+  const opts = { limit, offset, includeImages: include_images, forceRefresh: force_refresh === true };
 
   // Build the list of {id, query_type} pairs to execute
   let queryPairs: Array<{ id: string; query_type: string }>;
