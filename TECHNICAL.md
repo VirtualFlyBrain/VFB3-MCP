@@ -180,6 +180,19 @@ The server integrates with VirtualFlyBrain APIs:
 - **Search API**: `https://v3-cached.virtualflybrain.org/search`
 - **Facet vocabulary API**: `https://v3-cached.virtualflybrain.org/facets`
 - **Connectivity API**: `https://v3-cached.virtualflybrain.org/query_connectivity`
+- **Hierarchy API**: `https://v3-cached.virtualflybrain.org/get_hierarchy`
+- **Entity resolution APIs**: `https://v3-cached.virtualflybrain.org/resolve_entity`, `/resolve_combination`
+- **Connectome dataset list**: `https://v3-cached.virtualflybrain.org/list_connectome_datasets`
+- **Cross-reference API**: `https://v3-cached.virtualflybrain.org/xref`
+- **Set-algebra API**: `https://v3-cached.virtualflybrain.org/combine`
+
+These are every path on VFBquery's `ALLOWED_PATHS` allowlist that is a query. The
+remainder are deliberately not called: `/health` and `/status` are operational;
+`/find_stocks` and `/find_combo_publications` are retired in favour of the
+`FindStocks` and `FindComboPublications` `run_query` query types, which return the
+standard `{headers, rows, count}` shape; and `/get_hierarchy_html` is off the
+allowlist entirely, being the geppetto ROI browser's pre-rendered markup rather than
+an API.
 
 The server no longer talks to `solr.virtualflybrain.org` directly. It used to build
 its own Solr query for search — its own `fq`, its own `bq`, its own `qf` — and that
@@ -251,6 +264,91 @@ deterministic — the same logical pair of classes comes back as `"A|B"` on one 
 `"B|A"` on the next. Left alone that splits one class pair across several summary rows
 and inflates `distinct_class_pairs`. The parts are sorted before keying, which gives one
 stable spelling per label set.
+
+#### resolve_entity / resolve_combination
+- **Input**: `name` — the raw, unresolved string as the user wrote it
+- **Output**: VFB/FlyBase IDs and metadata from the endpoint's tiered resolution (exact name → synonym → broad pattern match), passed through unmodified
+- **API Call**: GET `/resolve_entity`, GET `/resolve_combination`
+
+Both are free-text → ID resolvers, not query types, which is why they remain dedicated
+tools while `FindStocks` and `FindComboPublications` were folded into `run_query`. They
+take unresolved text only; a caller that already has an `FBgn`/`FBco`/VFB ID should go
+straight to the downstream query.
+
+#### list_connectome_datasets
+- **Input**: none
+- **Output**: dataset labels and symbols, passed through unmodified
+- **API Call**: GET `/list_connectome_datasets`
+
+The symbols are what `query_connectivity`'s `exclude_dbs` accepts, so this stands in the
+same relation to `query_connectivity` as `list_search_facets` does to `search_terms`.
+
+#### get_hierarchy
+- **Input**: `id`, `relationship` (`part_of` | `subclass_of`), optional `direction` and `max_depth`
+- **Output**: nested descendant tree and/or ancestor chain, passed through unmodified
+- **API Call**: GET `/get_hierarchy`, 2-minute timeout
+
+`relationship` is required by the tool schema but omitted from the query string when
+absent, so a caller that drops it gets the endpoint's own default (`part_of`) rather
+than a 400 on the literal string `undefined`.
+
+#### lookup_xref
+- **Input**: exactly one of `id` or `accession`, plus optional `db`
+- **Output**: `{query, direction, count, candidates_checked, db_matched?, available_dbs?, _note?, rows}`
+- **API Call**: GET `/xref`, 2-minute timeout
+
+The exactly-one check is done client-side so the message names the tool's own parameters
+and says which direction each runs; upstream's own 400 is otherwise fine.
+
+Shaping is confined to one thing, and it is the reason the tool exists. `rows: [], count: 0`
+is returned for two situations that mean opposite things, distinguishable only by
+`direction`:
+
+- `id_to_accession` is a single document fetch against the term's own cross-reference
+  list, so empty is authoritative — the term has no cross-references.
+- `accession_to_id` is `/search` for the accession followed by an exact confirmation
+  against each candidate's own xref list, so empty means the index did not reach a term
+  carrying it. Cross-references are not an indexed field on either Solr core; an
+  accession is searchable only because VFB writes it into the label
+  (`DA1_lPN_R (FlyEM-HB:1734350908)`). Connectome bodyIds therefore resolve, and an
+  accession from a link-out-only site cannot.
+
+`shapeXrefResult` attaches the note that says which of the two happened. Without it a
+model reads the second case as "no such neuron exists" — and reaching for `search_terms`
+instead, which ranks a near-miss first with no confirmation step, is the failure that
+prompted the endpoint. When `direction` is missing the cautious note is used: asserting
+authority that cannot be verified is the worse error.
+
+#### combine_queries
+- **Input**: `expr`, `operands` (object), optional `universe`, `limit`, `include_images`, `explain_only`, `require_complete`
+- **Output**: `{expression, as_read, plain_english, count, returned, limit, steps, operands, universe, capped?, warnings?, _note?, headers, rows}`
+- **API Call**: GET `/combine`, 5-minute timeout (each operand is a separate live query)
+
+Operands are passed as a JSON object rather than as arbitrary top-level parameters, which
+is how the HTTP endpoint takes them. That keeps operand names out of the tool's own
+parameter namespace — the reason upstream needs a `_COMBINE_RESERVED` list at all — and
+lets the tool reject a clashing name (`limit`, `universe`, `expr`, …) by pointing at it.
+Upstream skips a reserved name silently, which leaves the expression referring to a set
+that does not exist.
+
+Two upstream defaults are wrong for a model and are overridden on the way through:
+
+- **`limit` defaults to 0 upstream, meaning every row.** A 220-row answer carrying
+  thumbnails is 428 KB; stripped and cut to 25 rows it is 9.5 KB. An explicit `limit` is
+  always sent, because omitting it is not the same as asking for the tool's default.
+- **Rows carry `thumbnail`.** Stripped unless `include_images`, reusing
+  `RUN_QUERY_IMAGE_COLUMNS` so `run_query` and `combine_queries` cannot drift apart on
+  what counts as an image column.
+
+`offset` is **not** exposed. Upstream reserves the name but does not implement it and
+warns that it ignored it; a documented parameter that silently does nothing is worse than
+an absent one. The paging note tells the caller to raise `limit` instead.
+
+Key order is deliberate. `expression`, `as_read` and `plain_english` come first and
+`rows` last, for the reason the 1.11.0 `run_query` shaping does it: a caveat printed after
+220 rows is a caveat that gets skimmed past, and `as_read` is the only check available
+against a misgrouped expression. An `explain_only` response has no `rows` at all and is
+passed through untouched.
 
 ### Error Handling
 

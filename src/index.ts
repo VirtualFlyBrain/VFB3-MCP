@@ -12,6 +12,7 @@ import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { shapeRunQueryResult, runQueryFailed } from './runQueryShape.js';
+import { shapeCombineResult, shapeXrefResult } from './combineShape.js';
 
 // Version is single-sourced from package.json so a release tag (forced into
 // package.json by CI before the build) flows straight into serverInfo.
@@ -369,6 +370,70 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
             required: ['id', 'relationship'],
           },
         },
+        {
+          name: 'lookup_xref',
+          description: 'Map a VFB ID to its external database accessions, or an external accession back to the VFB term that carries it. USE THIS INSTEAD OF search_terms FOR ANY EXTERNAL ACCESSION — a hemibrain/FAFB/MANC bodyId, a CATMAID skeleton id, a neuprint id. Free-text search on a bare number ranks a plausible near-miss first and gives you no way to tell a real match from a good guess; this tool confirms the accession against each candidate term\'s own cross-reference list and returns a row only if that term really carries it. Each row gives the VFB id, label, site (db, db_label, site_id), the accession and a resolved deep link into the external site. Pass exactly one of id or accession. THE TWO DIRECTIONS DIFFER WHEN EMPTY: an empty id->accession result is authoritative (the term has no cross-references); an empty accession->id result means the search index did not reach a term carrying that accession, NOT that no such term exists — report it as "could not confirm", never as "does not exist", and do not substitute a search_terms guess.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                description: 'A VFB ID to list external accessions for (e.g. VFB_jrchjtdb). Mutually exclusive with accession.',
+              },
+              accession: {
+                type: 'string',
+                description: 'An external accession to resolve back to a VFB term (e.g. 1734350908 for a hemibrain bodyId). Mutually exclusive with id.',
+              },
+              db: {
+                type: 'string',
+                description: 'Optional site filter. Matches a site symbol ("hb"), short_form ("neuprint_JRC_Hemibrain_1point2point1") or label, ignoring case, punctuation and spacing, and also accepts whole words from those names — "flywire", "hemibrain", "neuprint", "catmaid", "male-cns" all work. When set, the response carries db_matched and available_dbs; a filtered empty result means "none from this site", not "none at all".',
+              },
+            },
+          },
+        },
+        {
+          name: 'combine_queries',
+          description: 'Boolean set algebra over the results of two or more VFB queries, compared on term ID. USE THIS INSTEAD OF RUNNING THE QUERIES SEPARATELY AND INTERSECTING THEM YOURSELF — the operands are often hundreds or thousands of rows each, so doing it by hand is both slow and a common source of wrong answers. Answers questions of the form "which neurons are in both X and Y", "in X but not Y", "in either but not both". Operators: AND OR NOT XOR NAND NOR XNOR, unary NOT, brackets, symbol aliases (& | - ^) and plain-English aliases ("but not", "in both", "either but not both"). Precedence loosest-first: OR/NOR, then XOR/XNOR, then AND/NAND/NOT, all left-associative. The response explains itself — as_read gives the grouping actually parsed, plain_english reads the whole expression back, steps traces the size of every intermediate set, and warnings flag the three ways a combination is silently wrong (a truncated operand, two sides in different ID namespaces, a complement against an implicit universe). ALWAYS CHECK as_read AGAINST WHAT THE USER ASKED before reporting the answer; use explain_only=true to see the parse for free before spending a query. Query-type operands must name a real query_type — get it from get_term_info\'s Queries array for the term in question, exactly as for run_query.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              expr: {
+                type: 'string',
+                description: 'The boolean expression over your operand names, e.g. "calyx AND lh", "calyx but not lh", "(a OR b) AND NOT c". Max 2000 characters.',
+              },
+              operands: {
+                type: 'object',
+                description: 'Named sets referenced by expr. Each value takes one of three forms: "<QueryType>:<id>" to run a query (e.g. "NeuronsPartHere:FBbt_00007401" — any run_query query_type), "search:<text>" for a free-text search, or "ids:<id>,<id>" for a literal set (useful for a list from a paper or the ids of a previous combine). Max 12 operands.',
+                additionalProperties: { type: 'string' },
+              },
+              universe: {
+                type: 'string',
+                description: 'Optional operand spec, same three forms, defining what "everything" means for a complement (NOT, NAND, NOR, XNOR). Defaults to the union of the operands in the expression, because VFB holds around 750,000 terms and returning most of them is never the intended answer.',
+              },
+              limit: {
+                type: 'number',
+                description: 'Rows to return (default 25). count is always the true size of the result set. There is no offset — raise limit, or pass 0 for every row, only on a result you already know is small.',
+                default: 25,
+              },
+              include_images: {
+                type: 'boolean',
+                description: 'Include the thumbnail column (default false — it is stripped to save space; on a 220-row result it is the difference between 428 KB and 9.5 KB).',
+                default: false,
+              },
+              explain_only: {
+                type: 'boolean',
+                description: 'Parse and explain the expression without running any query (default false). Returns as_read, plain_english and the universe note in well under a kilobyte. Use it to confirm the grouping of anything more complicated than a single operator before spending real work.',
+                default: false,
+              },
+              require_complete: {
+                type: 'boolean',
+                description: 'Fail rather than answer if any operand was truncated (default false). A set operation over a truncated operand is silently wrong, so set this when the answer matters more than getting one.',
+                default: false,
+              },
+            },
+            required: ['expr', 'operands'],
+          },
+        },
       ],
     };
   });
@@ -405,6 +470,10 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[]; limit?: number; offset?: number });
         case 'get_hierarchy':
           return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number });
+        case 'lookup_xref':
+          return await handleLookupXref(args as { id?: string; accession?: string; db?: string });
+        case 'combine_queries':
+          return await handleCombineQueries(args as { expr: string; operands: Record<string, string>; universe?: string; limit?: number; include_images?: boolean; explain_only?: boolean; require_complete?: boolean });
         default:
           console.error('MCP Debug: Unknown tool requested:', name);
           throw new McpError(
@@ -1262,6 +1331,133 @@ async function handleGetHierarchy(args: {
   }
 }
 
+// /xref and /combine are shaped in combineShape.ts; see that file for why an
+// empty result from each direction of /xref means something different, and why
+// /combine's upstream defaults (every row, thumbnails included) are wrong for a
+// model.
+
+const COMBINE_DEFAULT_LIMIT = 25;
+// Upstream refuses more than 12 operands, deliberately: each one is a separate
+// query against Neo4j or Solr and a single request that fans out to fifty is a
+// denial of service against everyone else. Checking here turns a 400 into a
+// message the model can act on.
+const COMBINE_MAX_OPERANDS = 12;
+// Reserved upstream, so an operand may not be named after one. `offset`,
+// `order_by` and `force_refresh` are reserved but NOT implemented — this tool
+// does not expose them at all rather than accept a parameter that is silently
+// ignored.
+const COMBINE_RESERVED_NAMES = new Set([
+  'expr', 'expression', 'q', 'universe', 'limit', 'offset',
+  'require_complete', 'explain_only', 'order_by', 'force_refresh',
+]);
+
+async function handleLookupXref(args: { id?: string; accession?: string; db?: string }):
+  Promise<{ content: Array<{ type: string; text: string }> }> {
+  const id = (args.id ?? '').trim();
+  const accession = (args.accession ?? '').trim();
+  // Caught here rather than upstream so the message names the tool's own
+  // parameters and says which way round each direction runs.
+  if (!!id === !!accession) {
+    return { content: [{ type: 'text', text:
+      'Provide exactly one of id or accession. Use id to list the external accessions a VFB term carries ' +
+      '(e.g. id=VFB_jrchjtdb); use accession to find the VFB term that carries an external accession ' +
+      '(e.g. accession=1734350908).' }] };
+  }
+
+  const params = new URLSearchParams();
+  if (id) { params.set('id', id); } else { params.set('accession', accession); }
+  if (args.db) { params.set('db', args.db); }
+  const url = `${VFBQUERY_BASE}/xref?${params.toString()}`;
+  console.error(`MCP Debug: xref params=${params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 120000 });
+    const shaped = shapeXrefResult(response.data);
+    return { content: [{ type: 'text', text: JSON.stringify(shaped, null, 2) }] };
+  } catch (error) {
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Cross-reference lookup rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error looking up cross-reference: ${error}` }] };
+  }
+}
+
+async function handleCombineQueries(args: {
+  expr: string;
+  operands: Record<string, string>;
+  universe?: string;
+  limit?: number;
+  include_images?: boolean;
+  explain_only?: boolean;
+  require_complete?: boolean;
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const expr = (args.expr ?? '').trim();
+  if (!expr) {
+    return { content: [{ type: 'text', text:
+      'combine_queries needs an expression, e.g. expr="calyx AND lh" with operands ' +
+      '{"calyx": "NeuronsPartHere:FBbt_00007401", "lh": "NeuronsPartHere:FBbt_00007053"}.' }] };
+  }
+
+  const operands = (args.operands && typeof args.operands === 'object' && !Array.isArray(args.operands))
+    ? args.operands : {};
+  const names = Object.keys(operands);
+  if (names.length === 0) {
+    return { content: [{ type: 'text', text:
+      'combine_queries needs at least one named operand. Each value is "<QueryType>:<id>", "search:<text>" ' +
+      'or "ids:<id>,<id>" — e.g. {"calyx": "NeuronsPartHere:FBbt_00007401"}.' }] };
+  }
+  if (names.length > COMBINE_MAX_OPERANDS) {
+    return { content: [{ type: 'text', text:
+      `combine_queries accepts at most ${COMBINE_MAX_OPERANDS} operands (given ${names.length}). Each operand ` +
+      'is a separate query against VFB, so the cap is a load limit rather than an expression limit. Combine ' +
+      'in stages: run one combination, then feed its ids back in as "ids:<id>,<id>".' }] };
+  }
+  // An operand named `limit` would arrive upstream as the page size, not as a
+  // set. Upstream skips reserved names silently, which turns the whole operand
+  // into nothing and leaves the expression referring to a set that does not
+  // exist — so refuse it here, where the name can be pointed at.
+  const clashes = names.filter((n) => COMBINE_RESERVED_NAMES.has(n.toLowerCase()));
+  if (clashes.length) {
+    return { content: [{ type: 'text', text:
+      `These operand names are reserved and would be discarded: ${clashes.join(', ')}. Rename them (e.g. ` +
+      'set_a, calyx, lh) and use the same names in expr.' }] };
+  }
+
+  const includeImages = args.include_images === true;
+  const explainOnly = args.explain_only === true;
+  const rawLimit = Number(args.limit);
+  const limit = Number.isFinite(rawLimit) && rawLimit >= 0
+    ? Math.trunc(rawLimit) : COMBINE_DEFAULT_LIMIT;
+
+  const params = new URLSearchParams();
+  params.set('expr', expr);
+  for (const [name, spec] of Object.entries(operands)) { params.set(name, String(spec)); }
+  if (args.universe) { params.set('universe', args.universe); }
+  if (explainOnly) { params.set('explain_only', 'true'); }
+  if (args.require_complete === true) { params.set('require_complete', 'true'); }
+  // Sent even when it equals the default: upstream's own default is 0 (every
+  // row), so leaving it off is not the same as asking for 25.
+  if (!explainOnly) { params.set('limit', String(limit)); }
+
+  const url = `${VFBQUERY_BASE}/combine?${params.toString()}`;
+  console.error(`MCP Debug: combine expr=${expr} operands=${names.join(',')} limit=${limit} explain_only=${explainOnly}`);
+  try {
+    // Each operand is a full query, so a 12-operand expression is 12 queries
+    // deep — the same 5-minute ceiling query_connectivity gets.
+    const response = await axios.get(url, { timeout: 300000 });
+    const shaped = shapeCombineResult(response.data, { includeImages, limit });
+    return { content: [{ type: 'text', text: JSON.stringify(shaped, null, 2) }] };
+  } catch (error) {
+    // combine's 400s name the operand and say what shape was expected, which is
+    // exactly what the model needs to fix its own call.
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Combine request rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error combining queries: ${error}` }] };
+  }
+}
+
 function createServer(sessionIdHolder?: RequestContext): Server {
   const server = new Server(
     {
@@ -1456,6 +1652,8 @@ function getHtmlPage(): string {
     <li><code>list_connectome_datasets</code> - List available connectome datasets (e.g., Hemibrain, FAFB)</li>
     <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters, paged with summary statistics</li>
     <li><code>get_hierarchy</code> - Build a <code>part_of</code> or <code>subclass_of</code> hierarchy tree for a VFB term</li>
+    <li><code>lookup_xref</code> - Map a VFB ID to its external database accessions, or a confirmed external accession (e.g. a hemibrain bodyId) back to the VFB term that carries it</li>
+    <li><code>combine_queries</code> - Boolean set algebra (AND, OR, NOT, XOR&hellip;) over the results of two or more queries, with a step trace and a plain-English reading of the expression</li>
   </ul>
 
   <h2>🧠 About VirtualFlyBrain</h2>

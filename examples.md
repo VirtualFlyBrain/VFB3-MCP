@@ -253,6 +253,134 @@ Traverse `part_of` (region structure) or `subclass_of` (cell-type taxonomy) for 
 
 Returns the direct parts of the mushroom body (`FBbt_00005801`). Use `relationship: "subclass_of"` for cell-type taxonomies (e.g. `FBbt_00003686`, Kenyon cell), and increase `max_depth` to expand deeper.
 
+### 14. Resolve an External Accession to a VFB Term
+
+The user gives you a connectome bodyId. Do **not** put it through `search_terms` — a bare number ranks a plausible near-miss first.
+
+```json
+{
+  "name": "lookup_xref",
+  "arguments": {
+    "accession": "1734350908"
+  }
+}
+```
+
+```json
+{
+  "query": "1734350908",
+  "direction": "accession_to_id",
+  "rows": [
+    {
+      "id": "VFB_jrchjtdb",
+      "label": "DA1_lPN_R (FlyEM-HB:1734350908)",
+      "db": "hb",
+      "db_label": "Neuprint web interface - hemibrain:v1.2.1",
+      "site_id": "neuprint_JRC_Hemibrain_1point2point1",
+      "accession": "1734350908",
+      "is_data_source": true,
+      "link": "https://neuprint.janelia.org/results?dataset=hemibrain:v1.2.1&..."
+    }
+  ],
+  "count": 1,
+  "candidates_checked": 1
+}
+```
+
+The row is returned only because that term's own cross-reference list was checked and really does carry `1734350908`. An empty `accession_to_id` result arrives with a `_note` saying it is "could not confirm", not "does not exist".
+
+### 14b. List a Term's External Links
+
+The other direction, optionally filtered to one site:
+
+```json
+{
+  "name": "lookup_xref",
+  "arguments": {
+    "id": "VFB_jrchjtdb",
+    "db": "neuprint"
+  }
+}
+```
+
+An empty result here *is* authoritative — the forward lookup reads the term's own cross-reference list — but under a `db` filter it means "none from this site". The response says which.
+
+### 15. Combine Two Queries with Set Algebra
+
+"Which neurons have a part in both the calyx and the lateral horn?" The two operands are 574 and 1661 rows; do not fetch both and intersect them by hand.
+
+```json
+{
+  "name": "combine_queries",
+  "arguments": {
+    "expr": "calyx AND lh",
+    "operands": {
+      "calyx": "NeuronsPartHere:FBbt_00007401",
+      "lh": "NeuronsPartHere:FBbt_00007053"
+    }
+  }
+}
+```
+
+```json
+{
+  "expression": "calyx AND lh",
+  "as_read": "(calyx AND lh)",
+  "plain_english": "only the things found by BOTH calyx (NeuronsPartHere of FBbt_00007401) and lh (NeuronsPartHere of FBbt_00007053)",
+  "count": 220,
+  "returned": 25,
+  "limit": 25,
+  "steps": [
+    { "operation": "AND", "input_counts": [574, 1661], "result_count": 220 }
+  ],
+  "operands": {
+    "calyx": { "rows_returned": 574, "truncated": false },
+    "lh": { "rows_returned": 1661, "truncated": false }
+  },
+  "_note": "Image columns (thumbnail) were excluded... Showing 25 of 220 rows. /combine has no offset..."
+}
+```
+
+Check `as_read` against what was actually asked before reporting the answer — it is the only guard against a misgrouped expression.
+
+### 15b. Check the Grouping Before Spending a Query
+
+`explain_only` parses and explains without running anything. Worth doing for any expression with more than one operator.
+
+```json
+{
+  "name": "combine_queries",
+  "arguments": {
+    "expr": "calyx but not (lh OR mb)",
+    "operands": {
+      "calyx": "NeuronsPartHere:FBbt_00007401",
+      "lh": "NeuronsPartHere:FBbt_00007053",
+      "mb": "NeuronsPartHere:FBbt_00005801"
+    },
+    "explain_only": true
+  }
+}
+```
+
+Returns `as_read`, `plain_english` and the universe note in well under a kilobyte.
+
+### 15c. Bring an Outside List into the Algebra
+
+`ids:` takes a literal set — a list from a paper's supplementary table, a hand-curated selection, or the IDs of a previous combine.
+
+```json
+{
+  "name": "combine_queries",
+  "arguments": {
+    "expr": "mine AND calyx",
+    "operands": {
+      "mine": "ids:VFB_jrchjtdb,VFB_jrchjtdc,VFB_jrchjtdd",
+      "calyx": "NeuronsPartHere:FBbt_00007401"
+    }
+  }
+}
+```
+
 ## Integration with MCP Clients
 
 ### Claude Desktop
