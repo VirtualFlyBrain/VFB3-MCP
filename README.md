@@ -157,6 +157,10 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters, returned as a strongest-first page plus a summary computed over every connection found
 - `get_hierarchy` — Traverse the ontology hierarchy for a VFB ID: `part_of` (region/tissue structure) and/or `subclass_of` (cell-type taxonomy), ancestors and/or descendants
+- `lookup_xref` — Map a VFB ID to its external database accessions, or a confirmed external accession (a hemibrain/FAFB/MANC bodyId, a CATMAID skeleton id) back to the VFB term that carries it. Use this rather than `search_terms` for any accession
+- `combine_queries` — Boolean set algebra (`AND`, `OR`, `NOT`, `XOR`, …) over the results of two or more queries, with a step trace and a plain-English reading of the expression it parsed
+
+Full parameter documentation for each is in [Tool Reference](#-tool-reference) below.
 
 ## 🛠️ Local Installation
 
@@ -267,7 +271,7 @@ docker pull virtualflybrain/vfb3-mcp:latest
 docker run -p 3000:3000 virtualflybrain/vfb3-mcp:latest
 ```
 
-##  Available Tools
+## 📋 Tool Reference
 
 ### get_term_info
 Retrieve detailed information about VFB terms using their IDs.
@@ -327,6 +331,73 @@ Query synaptic connectivity between neuron classes across all connectome dataset
 - `exclude_dbs` (array, optional): Dataset symbols to exclude (recommended `["hb","fafb"]`); see `list_connectome_datasets`
 - `limit` (number, optional): Rows to return, strongest first (default 50; `0` for all)
 - `offset` (number, optional): Row to start from within the ranking (default 0)
+
+### resolve_entity
+Resolve an unresolved FlyBase-related query string into VFB/FlyBase IDs and metadata. This is *not* VFB term search: it takes the raw text a user wrote and works down a tiered resolution (exact name → synonym → broad pattern match). Pass driver lines, transgene names, cell-type labels and gene symbols — `P{VT054895-GAL4.DBD}`, `Hb9-GAL4`, `SS04495`, `MB002B`, `PAM cluster`, `dpp`.
+
+**Parameters:**
+- `name` (string): The unresolved string, exactly as the user wrote it
+
+Do not pass an ID you already have — an `FBgn`/`FBal`/`FBti`/`FBco`/`FBst` or a VFB ID goes straight to the downstream tool. For stocks, the downstream tool is `run_query` with `query_type: "FindStocks"`.
+
+### resolve_combination
+Resolve an unresolved split-GAL4 combination name or synonym to its `FBco` ID and component hemidrivers, using the same tiered resolution as `resolve_entity`.
+
+**Parameters:**
+- `name` (string): The combination name or synonym as written (e.g. `MB002B`, `SS04495`)
+
+Do not pass an `FBco` ID you already have. For that combination's publications, use `run_query` with `query_type: "FindComboPublications"`.
+
+### list_connectome_datasets
+List the available connectome datasets with their labels and symbols. Takes no parameters. Call it when you need valid dataset symbols — they are what `query_connectivity`'s `exclude_dbs` accepts. Common ones are Hemibrain (`hb`), FAFB (`fafb`) and MANC.
+
+### get_hierarchy
+Build a hierarchy tree for a VFB term, showing ancestors (parents) and/or descendants (children). Descendants come back as a nested tree for both relationship types; ancestors come back as a nested chain, filtered to nervous-system terms for `part_of`.
+
+**Parameters:**
+- `id` (string): VFB term ID (e.g. `FBbt_00005801` for mushroom body)
+- `relationship` (string): `part_of` for brain-region structure ("what are the parts of the mushroom body?"), `subclass_of` for cell-type taxonomy ("what types of Kenyon cell are there?")
+- `direction` (string, optional): `descendants`, `ancestors` or `both` (default `both`)
+- `max_depth` (number, optional): Levels to expand; 1 = direct children/parents only (default 1). `-1` is the full tree — use with care on a broad term
+
+Start at `max_depth: 1` and offer to go deeper rather than expanding a whole subtree unasked.
+
+### lookup_xref
+Map a VFB ID to its external database accessions, or an external accession back to the VFB term that carries it.
+
+**Use this rather than `search_terms` for any external accession** — a hemibrain/FAFB/MANC bodyId, a CATMAID skeleton id, a neuprint id. Free-text search on a bare number ranks a plausible near-miss first and offers no way to tell a real match from a good guess; this endpoint confirms the accession against each candidate term's own cross-reference list and returns a row only if that term really carries it.
+
+**Parameters:**
+- `id` (string, optional): A VFB ID whose external accessions you want (e.g. `VFB_jrchjtdb`)
+- `accession` (string, optional): An external accession to resolve back to a VFB term (e.g. `1734350908`)
+- `db` (string, optional): Site filter. Matches a symbol (`hb`), a `short_form` (`neuprint_JRC_Hemibrain_1point2point1`) or a label, ignoring case, punctuation and spacing, and also accepts whole words from those names — `flywire`, `hemibrain`, `neuprint`, `catmaid`, `male-cns` all work
+
+Pass exactly one of `id` or `accession`. Each row carries `id`, `label`, `db`, `db_label`, `site_id`, `accession`, `is_data_source` and a resolved deep link into the external site.
+
+**The two directions do not mean the same thing when they come back empty**, and the response says which you are looking at:
+
+- `id_to_accession` — one document fetch against the term's own cross-reference list. Empty is authoritative: this term has no cross-references.
+- `accession_to_id` — a search followed by an exact confirmation. Empty means no *indexed* term carrying that accession was reached, **not** that none exists. An accession is searchable only because VFB writes it into the term label (`DA1_lPN_R (FlyEM-HB:1734350908)`), so connectome bodyIds resolve while an accession from a link-out-only site will not. Report it as "could not confirm", and do not fall back to a search result as though it were a match.
+
+### combine_queries
+Boolean set algebra over the results of two or more queries, compared on term ID. Answers "which neurons are in both X and Y", "in X but not Y", "in either but not both".
+
+**Use this rather than running the queries separately and intersecting them yourself.** Operands are routinely hundreds or thousands of rows each; the server does the comparison in about a second and returns the answer with its own audit trail.
+
+**Parameters:**
+- `expr` (string): The expression over your operand names — `calyx AND lh`, `calyx but not lh`, `(a OR b) AND NOT c`. Max 2000 characters
+- `operands` (object): Named sets referenced by `expr`. Each value is `"<QueryType>:<id>"` (any `run_query` query type), `"search:<text>"`, or `"ids:<id>,<id>"` for a literal set. Max 12 operands
+- `universe` (string, optional): Operand spec defining what "everything" means for a complement. Defaults to the union of the operands
+- `limit` (number, optional): Rows to return (default 25). `count` is always the true size of the result set; `0` returns every row
+- `include_images` (boolean, optional): Include the `thumbnail` column (default false — on a 220-row result it is the difference between 428 KB and 9.5 KB)
+- `explain_only` (boolean, optional): Parse and explain without running any query (default false)
+- `require_complete` (boolean, optional): Fail rather than answer if any operand was truncated (default false)
+
+Operators: `AND OR NOT XOR NAND NOR XNOR`, unary `NOT`, brackets, symbol aliases (`&` `|` `-` `^`) and plain-English aliases ("but not", "in both", "either but not both"). Precedence, loosest first: `OR`/`NOR`, then `XOR`/`XNOR`, then `AND`/`NAND`/`NOT`, all left-associative.
+
+The response explains itself: `as_read` gives the grouping actually parsed, `plain_english` reads the whole expression back, `steps` traces the size of every intermediate set, `operands` reports what each one returned, and `warnings` flags the three ways a combination is silently wrong — a truncated operand, two sides in different ID namespaces, and a complement against an implicit universe. **Check `as_read` against what was asked before reporting the answer**; `explain_only: true` shows the parse for under a kilobyte and no query cost.
+
+There is no `offset`. Upstream reserves the name but does not implement it, so raise `limit` instead of paging.
 
 ## 🧠 About VirtualFlyBrain
 

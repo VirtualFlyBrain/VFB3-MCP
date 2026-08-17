@@ -1,14 +1,29 @@
 # VFB3-MCP: Comprehensive LLM Guidance
 
-## ⚠️ READ THIS FIRST — Three Rules
+## ⚠️ READ THIS FIRST — Four Rules
 
-These three rules apply to every VFB question. Re-read them whenever a tool call returns empty or unexpected results.
+These four rules apply to every VFB question. Re-read them whenever a tool call returns empty or unexpected results.
+
+### Rule 0 — Route on what the user gave you
+
+Before anything else, look at the identifier in the question. `search_terms` is for *names*, and using it on anything else is the single most common way to get a confident wrong answer.
+
+| What the user gave you | Tool | Never |
+|---|---|---|
+| A VFB or ontology ID (`VFB_*`, `FBbt_*`) | `get_term_info` | — |
+| An external accession — a hemibrain/FAFB/MANC bodyId, a CATMAID skeleton id, any bare number from another site | **`lookup_xref`** with `accession` | ❌ `search_terms` |
+| A FlyBase-ish name or driver line (`P{VT054895-GAL4.DBD}`, `Hb9-GAL4`, `dpp`) | `resolve_entity` | ❌ `search_terms` |
+| A split-GAL4 combination name (`MB002B`, `SS04495`) | `resolve_combination` | ❌ `search_terms` |
+| A FlyBase ID you already have (`FBgn`, `FBco`, `FBst`, …) | `run_query` directly | ❌ a resolver |
+| An anatomical or cell-type **name** ("medulla", "Kenyon cell") | `search_terms` | — |
+
+`search_terms` is a ranked text search. Given a bare number it will return its best-ranked *guess* and give you no way to tell that from a match — this is exactly how a hemibrain bodyId was once resolved to the wrong neuron. `lookup_xref` confirms the accession against each candidate term's own cross-reference list and returns a row only if it really carries it.
 
 ### Rule 1 — Discover queries before running them
 
 For any VFB or anatomy ontology ID (`VFB_*`, `FBbt_*`), the workflow is **always**:
 
-1. **`search_terms`** — find the ID (skip if the user already provided one).
+1. **`search_terms`** — find the ID (skip if the user already provided one, or use `lookup_xref` / `resolve_entity` per Rule 0).
 2. **`get_term_info`** — read the `Queries` array. This lists the valid `query_type` values for this entity.
 3. **`run_query`** — pass `id` and a `query_type` taken from that `Queries` array.
 
@@ -40,6 +55,11 @@ If `search_terms` returns no good matches:
 
 - Try alternative spellings, synonyms, or a broader term.
 - Try with different `filter_types` (see the cookbook below).
+
+**`lookup_xref` is the sharpest case of this rule, and its two directions differ.** The response's `direction` field says which you got:
+
+- `id_to_accession` — empty **is** authoritative. The lookup read the term's own cross-reference list. Say "this term has no cross-references" (or, if you passed `db`, "none from that site").
+- `accession_to_id` — empty is **not** authoritative. Cross-references are not an indexed field; the lookup can only confirm a term the text search reached, and an accession is searchable only because VFB writes it into the label (`DA1_lPN_R (FlyEM-HB:1734350908)`). Connectome bodyIds normally resolve; an accession from a site VFB only links out to will not. Say the accession **could not be confirmed** — never "does not exist" — and do **not** fall back to a `search_terms` result as though it were a match.
 
 ### Rule 3 — Never substitute training knowledge for missing data
 
@@ -448,6 +468,8 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 | `UpstreamClassConnectivity` | Neuron class FBbt ID | Upstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `query_connectivity` | Neuron class names or FBbt IDs | Connections between two neuron classes (includes data from all datasets) | Slow (1–5 min, live) |
 
+None of these answers a question about **set membership across two regions** — "which neurons have a part in both the calyx and the lateral horn" is not a connectivity question at all. That is `combine_queries` over two `NeuronsPartHere` operands; see *Set Operations* under Cross-tool Patterns.
+
 ### Step 2: Run the Query
 
 #### For `run_query` connectivity queries (fast path)
@@ -661,8 +683,33 @@ Specific patterns:
 - `search_terms` (validate neuron class) → `query_connectivity` (dual-end class-to-class)
 - `search_terms` → `get_term_info` (get VFB ID) → `run_query` with `NeuronNeuronConnectivityQuery`, `NeuronRegionConnectivityQuery`, or `NeuronInputsTo`
 - `search_terms` (find term) → `get_hierarchy` (explore structure or taxonomy)
+- `lookup_xref` (accession → VFB ID) → `get_term_info` → `run_query` — the entry point for any question that starts from a connectome bodyId
+- `get_term_info` → `lookup_xref` with `id` — to give the user a deep link into neuprint, CATMAID or FlyWire for a term you have already found
 
 If a chain step returns empty or an error, do not stop — try a different `query_type` from the `Queries` array, or a related entity. See Rule 2.
+
+### Set Operations — never intersect result sets by hand
+
+When a question compares two result sets — "in both", "in X but not Y", "in either but not both" — use **`combine_queries`**. Do not run the two queries separately and compare the rows yourself.
+
+Doing it by hand fails in three ways that `combine_queries` handles: the operands are routinely hundreds or thousands of rows (574 and 1661 for a single calyx/lateral-horn question), so paging both to completion is slow and easy to abandon halfway; comparing a *truncated* page against another silently produces a wrong answer that looks right; and two sets keyed on different ID namespaces will happily "intersect" to nothing without saying why. The endpoint checks all three and warns.
+
+```
+combine_queries(
+  expr = "calyx AND lh",
+  operands = { "calyx": "NeuronsPartHere:FBbt_00007401",
+               "lh":    "NeuronsPartHere:FBbt_00007053" }
+)
+```
+
+Rule 1 still applies to the operands: `NeuronsPartHere` has to be a real `query_type` from the relevant term's `Queries` array, not a guess. Operands can also be `search:<text>` or a literal `ids:<id>,<id>` set — the latter is how you feed a previous result, or a list from a paper, back into the algebra.
+
+Two habits worth keeping:
+
+- **Read `as_read` back before you report anything.** It is the grouping the server actually parsed, and it is the only check you have that "A but not B or C" was understood the way the user meant. For anything with more than one operator, run `explain_only: true` first — it returns the parse and a plain-English reading for under a kilobyte and no query cost.
+- **Report from `count`, not from the rows you can see.** `count` is the true size of the result set; `returned` is the page. There is no `offset` — raise `limit` if you need more.
+
+If `warnings` mentions a truncated operand, say so rather than presenting the number as final, or re-run with `require_complete: true` to make the endpoint refuse instead of guessing.
 
 ## How to Interpret Image Data
 
