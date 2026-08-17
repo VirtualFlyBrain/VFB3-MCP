@@ -11,16 +11,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Robbie1977/VFB3-MCP.git"
+    "url": "git+https://github.com/VirtualFlyBrain/VFB3-MCP.git"
   },
   "keywords": [],
   "author": "Robbie1977",
   "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/Robbie1977/VFB3-MCP/issues"
+    "url": "https://github.com/VirtualFlyBrain/VFB3-MCP/issues"
   },
-  "homepage": "https://github.com/Robbie1977/VFB3-MCP#readme",
+  "homepage": "https://github.com/VirtualFlyBrain/VFB3-MCP#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "axios": "^1.13.4",

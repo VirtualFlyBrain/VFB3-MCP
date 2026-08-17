@@ -1463,7 +1463,7 @@ function getHtmlPage(): string {
 
   <h2>📖 Documentation</h2>
   <ul>
-    <li><a href="https://github.com/Robbie1977/VFB3-MCP#readme">Full Documentation on GitHub</a></li>
+    <li><a href="https://github.com/VirtualFlyBrain/VFB3-MCP#readme">Full Documentation on GitHub</a></li>
     <li><a href="https://virtualflybrain.org">Virtual Fly Brain Website</a></li>
   </ul>
 
