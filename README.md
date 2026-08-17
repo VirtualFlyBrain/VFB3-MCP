@@ -169,7 +169,7 @@ The MCP server exposes the following tools (available to assistants like Claude 
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/Robbie1977/VFB3-MCP.git
+   git clone https://github.com/VirtualFlyBrain/VFB3-MCP.git
    cd VFB3-MCP
    ```
 

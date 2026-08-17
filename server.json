@@ -6,9 +6,9 @@
   "version": "1.11.0",
   "websiteUrl": "https://virtualflybrain.org",
   "repository": {
-    "url": "https://github.com/Robbie1977/VFB3-MCP",
+    "url": "https://github.com/VirtualFlyBrain/VFB3-MCP",
     "source": "github",
-    "id": "1150713920"
+    "id": "1151949164"
   },
   "remotes": [
     {
