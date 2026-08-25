@@ -1,6 +1,17 @@
 # VFB3-MCP Server
 
-A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB) APIs. This server provides tools to query VFB data, run queries, and search for terms. In HTTP mode it runs statelessly (no session tracking), so any replica can handle any request and standard load balancing works.
+A Model Context Protocol (MCP) server for Virtual Fly Brain (VFB): query *Drosophila melanogaster* neuroanatomy, connectomics, expression and reagent data from Claude, Copilot or any other MCP client.
+
+**Canonical repository:** [VirtualFlyBrain/VFB3-MCP](https://github.com/VirtualFlyBrain/VFB3-MCP) (this one) — maintained by the Virtual Fly Brain team.
+**Hosted service:** `https://vfb3-mcp.virtualflybrain.org` — no installation, no API key, no account.
+
+```bash
+claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org
+```
+
+The earlier copy at `Robbie1977/VFB3-MCP` is archived at v1.3.0 and is not maintained; use this repository and the URL above.
+
+This server provides tools to query VFB data, run queries, and search for terms. In HTTP mode it runs statelessly (no session tracking), so any replica can handle any request and standard load balancing works.
 
 ## 🚀 Quick Start
 
