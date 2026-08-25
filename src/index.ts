@@ -1304,10 +1304,14 @@ function getHtmlPage(): string {
   <p>A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB) APIs. This server provides tools to query VFB data, run queries, and search for terms.</p>
 
   <div class="endpoint">
-    <strong>MCP Endpoint:</strong> <code>https://vfb3-mcp.virtualflybrain.org</code>
+    <strong>MCP Endpoint:</strong> <code>https://vfb3-mcp.virtualflybrain.org</code><br>
+    <strong>Canonical repository:</strong> <a href="https://github.com/VirtualFlyBrain/VFB3-MCP">github.com/VirtualFlyBrain/VFB3-MCP</a>
   </div>
 
   <h2>🚀 Quick Start</h2>
+
+  <p>Add the hosted server in one command. There is no API key and no account to create.</p>
+  <pre><code>claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org</code></pre>
 
   <h3>Claude Desktop Setup</h3>
   <ol>
@@ -1336,6 +1340,7 @@ function getHtmlPage(): string {
   </div>
 
   <h3>Claude Code Setup</h3>
+  <p>Either run <code>claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org</code>, or edit the configuration file by hand:</p>
   <ol>
     <li class="step"><strong>Locate your Claude configuration file</strong>:
       <ul>
