@@ -10,7 +10,7 @@ import {
 import axios from 'axios';
 import cors from 'cors';
 import express from 'express';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { shapeRunQueryResult, runQueryFailed } from './runQueryShape.js';
 
 // Version is single-sourced from package.json so a release tag (forced into
@@ -24,40 +24,55 @@ const GA_API_SECRET = process.env.GA_API_SECRET || '';
 const GA_ENABLED = !!(GA_MEASUREMENT_ID && GA_API_SECRET);
 const STDIO_CLIENT_ID = randomUUID(); // fallback client_id for stdio mode
 
-function trackToolCall(
-  toolName: string,
-  toolArgs: Record<string, unknown>,
-  sessionId?: string,
-  clientIp?: string
+/**
+ * Derive a stable GA4 client_id for a caller. HTTP mode is stateless (fresh
+ * Server per request, no session ID), so without this every distinct caller
+ * would collapse onto the single process-wide STDIO_CLIENT_ID. Hashing the
+ * client IP gives repeat callers from the same address a consistent
+ * client_id across requests, which is what GA4 needs to bucket users/
+ * sessions and to carry user_properties (e.g. mcp_client_name) forward onto
+ * later events from that same caller.
+ */
+function deriveClientId(clientIp?: string): string {
+  if (!clientIp || clientIp === 'unknown') return STDIO_CLIENT_ID;
+  return createHash('md5').update(clientIp).digest('hex');
+}
+
+/**
+ * Low-level GA4 Measurement Protocol sender. clientIp goes on the top-level
+ * ip_override field (not a custom event param) so GA4 can derive real
+ * geography — this is a server-to-server POST, so without ip_override GA
+ * would otherwise geo-locate every event to this server's own egress IP.
+ */
+function sendGaEvent(
+  eventName: string,
+  params: Record<string, string>,
+  clientId: string,
+  clientIp?: string,
+  userProperties?: Record<string, { value: string }>
 ): void {
   if (!GA_ENABLED) return;
 
-  const clientId = sessionId || STDIO_CLIENT_ID;
-
-  // Flatten tool args into GA4 params with arg_ prefix, truncated to 100 chars
-  const argSummary: Record<string, string> = {};
-  for (const [key, value] of Object.entries(toolArgs)) {
-    const strValue = typeof value === 'string' ? value : JSON.stringify(value);
-    argSummary[`arg_${key}`] = strValue.slice(0, 100);
-  }
-
-  const payload = {
+  const payload: Record<string, unknown> = {
     client_id: clientId,
     events: [
       {
-        name: 'mcp_tool_call',
+        name: eventName,
         params: {
           session_id: clientId,
           engagement_time_msec: '100',
-          tool_name: toolName,
-          server_version: VERSION,
-          mcp_mode: process.env.MCP_MODE || 'stdio',
-          ...(clientIp ? { client_ip: clientIp } : {}),
-          ...argSummary,
+          ...params,
         },
       },
     ],
   };
+
+  if (clientIp && clientIp !== 'unknown') {
+    payload.ip_override = clientIp;
+  }
+  if (userProperties) {
+    payload.user_properties = userProperties;
+  }
 
   // Fire-and-forget: do not await, swallow all errors
   axios
@@ -68,6 +83,65 @@ function trackToolCall(
     .catch(() => {});
 }
 
+function trackToolCall(
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  clientId: string,
+  clientIp?: string
+): void {
+  if (!GA_ENABLED) return;
+
+  // Flatten tool args into GA4 params with arg_ prefix, truncated to 100 chars
+  const argSummary: Record<string, string> = {};
+  for (const [key, value] of Object.entries(toolArgs)) {
+    const strValue = typeof value === 'string' ? value : JSON.stringify(value);
+    argSummary[`arg_${key}`] = strValue.slice(0, 100);
+  }
+
+  sendGaEvent(
+    'mcp_tool_call',
+    {
+      tool_name: toolName,
+      server_version: VERSION,
+      mcp_mode: process.env.MCP_MODE || 'stdio',
+      ...argSummary,
+    },
+    clientId,
+    clientIp
+  );
+}
+
+/**
+ * Fired once per MCP `initialize` handshake (via server.oninitialized).
+ * clientInfo.name/version identify which MCP client is connecting (Claude
+ * Code, Claude.ai, Codex, a third-party scanner, ...) — captured as GA4
+ * user_properties (persistent per client_id) rather than a one-off event
+ * param, so it's usable for segmentation/audiences across every later event
+ * from that same caller, not just the initialize event itself.
+ */
+function trackClientInfo(
+  clientInfo: { name?: string; version?: string; title?: string } | undefined,
+  clientId: string,
+  clientIp?: string
+): void {
+  if (!GA_ENABLED || !clientInfo) return;
+
+  sendGaEvent(
+    'mcp_session_start',
+    {
+      mcp_mode: process.env.MCP_MODE || 'stdio',
+      client_name: (clientInfo.name || 'unknown').slice(0, 100),
+      client_version: (clientInfo.version || 'unknown').slice(0, 100),
+    },
+    clientId,
+    clientIp,
+    {
+      mcp_client_name: { value: (clientInfo.name || 'unknown').slice(0, 36) },
+      mcp_client_version: { value: (clientInfo.version || 'unknown').slice(0, 36) },
+    }
+  );
+}
+
 /**
  * Expand batch tool calls into individual tracking events so every
  * ID / query pair gets its own GA4 row with batch_size + batch_index.
@@ -75,14 +149,14 @@ function trackToolCall(
 function trackBatchToolCalls(
   toolName: string,
   toolArgs: Record<string, unknown>,
-  sessionId?: string,
+  clientId: string,
   clientIp?: string
 ): void {
   if (toolName === 'get_term_info') {
     const id = toolArgs.id;
     if (Array.isArray(id)) {
       for (let i = 0; i < id.length; i++) {
-        trackToolCall(toolName, { id: id[i], batch_size: id.length, batch_index: i }, sessionId, clientIp);
+        trackToolCall(toolName, { id: id[i], batch_size: id.length, batch_index: i }, clientId, clientIp);
       }
       return;
     }
@@ -95,25 +169,26 @@ function trackBatchToolCalls(
 
     if (queries && Array.isArray(queries) && queries.length > 0) {
       for (let i = 0; i < queries.length; i++) {
-        trackToolCall(toolName, { id: queries[i].id, query_type: queries[i].query_type, batch_size: queries.length, batch_index: i }, sessionId, clientIp);
+        trackToolCall(toolName, { id: queries[i].id, query_type: queries[i].query_type, batch_size: queries.length, batch_index: i }, clientId, clientIp);
       }
       return;
     }
     if (Array.isArray(id) && queryType) {
       for (let i = 0; i < id.length; i++) {
-        trackToolCall(toolName, { id: id[i], query_type: queryType, batch_size: id.length, batch_index: i }, sessionId, clientIp);
+        trackToolCall(toolName, { id: id[i], query_type: queryType, batch_size: id.length, batch_index: i }, clientId, clientIp);
       }
       return;
     }
   }
 
   // Single call — pass through as-is
-  trackToolCall(toolName, toolArgs, sessionId, clientIp);
+  trackToolCall(toolName, toolArgs, clientId, clientIp);
 }
 
 interface RequestContext {
   id?: string;
   clientIp?: string;
+  clientId?: string;
 }
 
 function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
@@ -429,9 +504,9 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
       : 1;
     console.error(`MCP Debug: Received CallTool request for tool: ${name} (batch_size=${batchSize}) client_ip=${sessionIdHolder?.clientIp || 'unknown'} with args:`, JSON.stringify(args));
 
-    const sid = sessionIdHolder?.id;
+    const cid = sessionIdHolder?.clientId || STDIO_CLIENT_ID;
     const cip = sessionIdHolder?.clientIp;
-    trackBatchToolCalls(name, args || {}, sid, cip);
+    trackBatchToolCalls(name, args || {}, cid, cip);
 
     try {
       switch (name) {
@@ -1372,6 +1447,10 @@ function createServer(sessionIdHolder?: RequestContext): Server {
       },
     }
   );
+  server.oninitialized = () => {
+    const clientId = sessionIdHolder?.clientId || STDIO_CLIENT_ID;
+    trackClientInfo(server.getClientVersion(), clientId, sessionIdHolder?.clientIp);
+  };
   setupToolHandlers(server, sessionIdHolder);
   return server;
 }
@@ -1633,7 +1712,11 @@ async function runHttpMode() {
       // Create a fresh server and transport for every request.
       // sessionIdGenerator: undefined = stateless mode — no session ID is
       // generated, returned, or validated. Any replica can handle any request.
-      const server = createServer({ clientIp });
+      // clientId is derived from clientIp so repeat callers from the same
+      // address share a stable GA4 client_id across these otherwise-unlinked
+      // requests, instead of every caller collapsing onto STDIO_CLIENT_ID.
+      const clientId = deriveClientId(clientIp);
+      const server = createServer({ clientIp, clientId });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
