@@ -167,6 +167,8 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `resolve_combination` — Resolve an unresolved split-GAL4 combination name or synonym into its component IDs
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters, returned as a strongest-first page plus a summary computed over every connection found
+- `get_predicted_neurotransmitters` — Predicted neurotransmitter(s) for a neuron class (and its subclasses) from per-instance connectome predictions, per instance or aggregated with mean confidence, optionally split by dataset
+- `get_known_neurotransmitters` — Known (curated) neurotransmitter(s) for a neuron class and its subclasses, from the ontology classification (no confidence)
 - `get_hierarchy` — Traverse the ontology hierarchy for a VFB ID: `part_of` (region/tissue structure) and/or `subclass_of` (cell-type taxonomy), ancestors and/or descendants
 
 ## 🛠️ Local Installation
@@ -338,6 +340,22 @@ Query synaptic connectivity between neuron classes across all connectome dataset
 - `exclude_dbs` (array, optional): Dataset symbols to exclude (recommended `["hb","fafb"]`); see `list_connectome_datasets`
 - `limit` (number, optional): Rows to return, strongest first (default 50; `0` for all)
 - `offset` (number, optional): Row to start from within the ranking (default 0)
+
+### get_predicted_neurotransmitters
+Predicted neurotransmitter(s) for a neuron class — itself or any subclass — from per-instance connectome predictions (each reconstructed neuron carries a predicted transmitter with a confidence). Aggregated to flat per-class rows by default (one per cell type × neurotransmitter, with `instances`, `percent_of_class`, `mean_confidence`); `aggregate=false` gives one row per neuron. `split_by_dataset=true` adds a `dataset` column so agreement across connectomes is visible. The neurotransmitter is a GO secretion term (`nt_id`/`nt_label`) — the same id space as `get_known_neurotransmitters`. Distinct from `get_known_neurotransmitters`, which is the curated classification without confidence.
+
+**Parameters:**
+- `neuron_type` (string, required): Neuron class OWL ID or label (means the class and its subclasses)
+- `aggregate` (boolean, optional): `true` (default) for per-class rows; `false` for per-instance rows
+- `split_by_dataset` (boolean, optional): `true` (aggregate only) for one row per (cell type, neurotransmitter, dataset)
+- `exclude_dbs` (array, optional): Dataset symbols to exclude (default `["hb","fafb"]`; `[]` for all)
+- `min_confidence` (number, optional): Drop predictions below this confidence (0..1)
+
+### get_known_neurotransmitters
+Known (curated) neurotransmitter(s) for a neuron class and its subclasses, from the ontology's classification rather than per-instance predictions — so no confidence. One row per (cell type, neurotransmitter): `{cell_type_id, cell_type, nt_id, nt_label}`, with `nt_id` a GO secretion term. Empty when the ontology asserts none (try `get_predicted_neurotransmitters` for the data-driven answer).
+
+**Parameters:**
+- `neuron_type` (string, required): Neuron class OWL ID or label (means the class and its subclasses)
 
 ## 🧠 About VirtualFlyBrain
 
