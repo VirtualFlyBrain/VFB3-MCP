@@ -25,7 +25,7 @@ The VFB3-MCP server supports two operational modes:
 - Express transport for HTTP mode using stateless JSON-over-HTTP (no SSE)
 - Stdio transport for local development
 - Stateless HTTP mode (no session tracking / no session IDs)
-- GA4 analytics use a stable server-side client ID in HTTP mode (no per-session IDs)
+- GA4 analytics: HTTP mode has no session IDs, so the GA4 `client_id` is derived by hashing the caller's IP (falls back to one shared process-wide ID only when the IP is unknown), giving distinct callers distinct client_ids without persisting a real session. The MCP `initialize` handshake's `clientInfo` (client name/version) is sent once per handshake as GA4 `user_properties` on that client_id, and tool-call events use the GA4 `ip_override` field (not a custom param) so GA can derive real caller geography.
 
 ## Infrastructure
 
