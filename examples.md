@@ -235,6 +235,43 @@ given. Broad queries find tens of thousands of connections.
 Rows 25–50 of the strongest-first ranking. The `summary` is identical on every page
 because it always covers the full result set — answer from it rather than from the rows.
 
+### 12c. Neurotransmitters (predicted and known)
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_predicted_neurotransmitters",
+    "arguments": {
+      "neuron_type": "Tm9",
+      "split_by_dataset": true
+    }
+  }
+}
+```
+
+Predicted neurotransmitter(s) for Tm9 (and its subtypes), from per-instance
+connectome predictions. Aggregated per class by default — one row per cell type ×
+neurotransmitter, with `instances`, `percent_of_class` and `mean_confidence`;
+`split_by_dataset: true` gives one row per (cell type, neurotransmitter, dataset).
+`aggregate: false` returns one row per neuron. The neurotransmitter is a GO secretion
+term (`nt_id`, e.g. `GO_0014055` acetylcholine). Tm9 comes back ~100% acetylcholine.
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_known_neurotransmitters",
+    "arguments": { "neuron_type": "Tm9" }
+  }
+}
+```
+
+The **curated** neurotransmitter(s) for Tm9 and its subclasses, from the ontology
+classification (no confidence) — one row per (cell type, GO term). Use
+`get_predicted_neurotransmitters` for the data-driven prediction and its confidence,
+and `get_known_neurotransmitters` for the established classification; they share the
+GO-term id space, and known-NT is empty when the ontology asserts none.
+
 ### 13. Get Ontology Hierarchy
 
 Traverse `part_of` (region structure) or `subclass_of` (cell-type taxonomy) for a VFB term. `relationship` is required; `direction` defaults to `both` and `max_depth` to `1`.

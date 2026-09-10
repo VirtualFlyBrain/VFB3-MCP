@@ -435,6 +435,11 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 - First use `search_terms` with `filter_types: ["neuron", "class"]` to find neuron classes in that region.
 - Then apply Rule 2 for the neuron classes found.
 
+**Rule 4 — User asks what neurotransmitter a neuron type uses (e.g. "Is Tm9 cholinergic?", "What NT does the moonwalker DN release?"):**
+- For the **data-driven prediction** with confidence → use `get_predicted_neurotransmitters` (per-instance connectome predictions; aggregated to the class by default, `split_by_dataset` to compare connectomes, `aggregate: false` for per-neuron rows).
+- For the **curated/established** classification (no confidence) → use `get_known_neurotransmitters`.
+- Both take a neuron class name or FBbt ID (covering its subclasses) and report the neurotransmitter as a GO secretion term, so their answers line up. If known-NT is empty, fall back to the prediction. These are the right tools for the NT of a whole *type*; for a single individual neuron's inputs' NTs, Rule 1's `NeuronInputsTo` still applies.
+
 **If unsure**, start with the `run_query` options listed in Rules 1–2. They are fast and cached. Only use `query_connectivity` when dual-end class filtering is specifically needed.
 
 ### Summary Table
@@ -447,6 +452,8 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 | `DownstreamClassConnectivity` | Neuron class FBbt ID | Downstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `UpstreamClassConnectivity` | Neuron class FBbt ID | Upstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `query_connectivity` | Neuron class names or FBbt IDs | Connections between two neuron classes (includes data from all datasets) | Slow (1–5 min, live) |
+| `get_predicted_neurotransmitters` | Neuron class name or FBbt ID | Predicted NT(s) per class (or per instance), with mean confidence, as GO terms; optional per-dataset split | Live (seconds) |
+| `get_known_neurotransmitters` | Neuron class name or FBbt ID | Curated NT(s) for the class and subclasses, as GO terms (no confidence) | Live (seconds) |
 
 ### Step 2: Run the Query
 

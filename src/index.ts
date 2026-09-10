@@ -340,6 +340,54 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           },
         },
         {
+          name: 'get_predicted_neurotransmitters',
+          description: 'Get the PREDICTED neurotransmitter(s) for a Drosophila neuron class — itself or any subclass — from per-instance connectome predictions (each reconstructed neuron carries a predicted transmitter with a confidence). Use this for "what neurotransmitter does <cell type> use?" when you want the data-driven prediction and its confidence. By default results are aggregated to flat per-class rows (one per cell type × neurotransmitter) with instance counts, percent_of_class and mean_confidence; set aggregate=false for one row per individual neuron. Set split_by_dataset=true to get one row per (cell type, neurotransmitter, dataset) so you can see agreement across connectomes. The neurotransmitter is reported as a GO secretion term (nt_id/nt_label), the same id space as get_known_neurotransmitters. This is distinct from get_known_neurotransmitters, which returns the ontology-curated classification without confidence. CONSTRAINTS: neuron class terms only (FBbt id or label); use search_terms with filter_types ["neuron","class"] to canonicalize. RECOMMENDED: exclude_dbs defaults to ["hb","fafb"]; pass [] for all datasets.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              neuron_type: {
+                type: 'string',
+                description: 'Neuron class — OWL ID (e.g. "FBbt_00003797") or label (e.g. "Tm9"). Means the class and all of its subclasses.',
+              },
+              aggregate: {
+                type: 'boolean',
+                description: 'If true (default), aggregate to flat per-class rows {cell_type_id, cell_type, nt_id, nt_label, instances, percent_of_class, mean_confidence}. If false, return one row per individual neuron {..., neuron_id, neuron_name, confidence, references, dataset}.',
+                default: true,
+              },
+              split_by_dataset: {
+                type: 'boolean',
+                description: 'If true (aggregate only), emit one row per (cell type, neurotransmitter, dataset) with a dataset column, so cross-connectome agreement is visible. Default false aggregates over all included datasets.',
+                default: false,
+              },
+              exclude_dbs: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Dataset symbols to exclude (default ["hb","fafb"]). Pass [] to include all datasets. Same symbols as query_connectivity / list_connectome_datasets.',
+              },
+              min_confidence: {
+                type: 'number',
+                description: 'Drop predictions below this confidence (0..1). Default 0 (keep all).',
+                default: 0,
+              },
+            },
+            required: ['neuron_type'],
+          },
+        },
+        {
+          name: 'get_known_neurotransmitters',
+          description: 'Get the KNOWN (curated) neurotransmitter(s) for a Drosophila neuron class and its subclasses, from the ontology\'s classification rather than per-instance predictions — so there is no confidence. Use this for "what neurotransmitter is <cell type> known to use?" when you want the curated/established answer. Returns one row per (cell type, neurotransmitter): {cell_type_id, cell_type, nt_id, nt_label}, where the neurotransmitter is a GO secretion term (same id space as get_predicted_neurotransmitters). Empty when the ontology asserts none — in that case try get_predicted_neurotransmitters for the data-driven prediction. CONSTRAINTS: neuron class terms only (FBbt id or label); use search_terms with filter_types ["neuron","class"] to canonicalize.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              neuron_type: {
+                type: 'string',
+                description: 'Neuron class — OWL ID (e.g. "FBbt_00003797") or label (e.g. "Tm9"). Means the class and all of its subclasses.',
+              },
+            },
+            required: ['neuron_type'],
+          },
+        },
+        {
           name: 'get_hierarchy',
           description: 'Build a hierarchy tree for a VFB term, showing ancestors (parents) and/or descendants (children). Use relationship "part_of" for brain region structure (e.g. "what are the parts of the mushroom body?") and "subclass_of" for cell type hierarchies (e.g. "what types of Kenyon cell are there?"). Descendants are returned as a nested tree for both relationship types. Ancestors are returned as a nested chain, filtered to nervous system terms for part_of. Start with max_depth=1 for direct parents/children, and offer to go deeper if the user wants more detail.',
           inputSchema: {
@@ -403,6 +451,10 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           return await handleListConnectomeDatasets();
         case 'query_connectivity':
           return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[]; limit?: number; offset?: number });
+        case 'get_predicted_neurotransmitters':
+          return await handleGetPredictedNeurotransmitters(args as { neuron_type: string; aggregate?: boolean; split_by_dataset?: boolean; exclude_dbs?: string[]; min_confidence?: number });
+        case 'get_known_neurotransmitters':
+          return await handleGetKnownNeurotransmitters(args as { neuron_type: string });
         case 'get_hierarchy':
           return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number });
         default:
@@ -1231,6 +1283,52 @@ async function handleQueryConnectivity(args: {
       return { content: [{ type: 'text', text: `Connectivity query rejected: ${detail}` }] };
     }
     return { content: [{ type: 'text', text: `Error querying connectivity: ${error}` }] };
+  }
+}
+
+async function handleGetPredictedNeurotransmitters(args: {
+  neuron_type: string;
+  aggregate?: boolean;
+  split_by_dataset?: boolean;
+  exclude_dbs?: string[];
+  min_confidence?: number;
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const params = new URLSearchParams();
+  params.set('neuron_type', args.neuron_type);
+  if (args.aggregate !== undefined) params.set('aggregate', String(args.aggregate));
+  if (args.split_by_dataset !== undefined) params.set('split_by_dataset', String(args.split_by_dataset));
+  if (args.exclude_dbs) params.set('exclude_dbs', args.exclude_dbs.join(','));
+  if (args.min_confidence !== undefined) params.set('min_confidence', String(args.min_confidence));
+  const url = `${VFBQUERY_BASE}/get_predicted_neurotransmitters?${params.toString()}`;
+  console.error(`MCP Debug: get_predicted_neurotransmitters params=${params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 300000 }); // 5 min — live subclass expansion + scan
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Predicted-neurotransmitter query rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error querying predicted neurotransmitters: ${error}` }] };
+  }
+}
+
+async function handleGetKnownNeurotransmitters(args: {
+  neuron_type: string;
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const params = new URLSearchParams();
+  params.set('neuron_type', args.neuron_type);
+  const url = `${VFBQUERY_BASE}/get_known_neurotransmitters?${params.toString()}`;
+  console.error(`MCP Debug: get_known_neurotransmitters params=${params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 300000 }); // 5 min — live subclass expansion
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Known-neurotransmitter query rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error querying known neurotransmitters: ${error}` }] };
   }
 }
 
