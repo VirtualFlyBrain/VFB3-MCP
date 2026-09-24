@@ -307,8 +307,11 @@ Call `list_search_facets` for valid type names — do not guess them, and do not
    - `FBgn\d+` → gene ID (use `run_query` with `query_type` `FindStocks`)
    - `FBal\d+` → allele ID (use `run_query` with `query_type` `FindStocks`)
    - `FBti\d+` → insertion ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBtp\d+` → transgenic construct ID (use `run_query` with `query_type` `FindStocks`)
    - `FBco\d+` → combination ID (use `run_query` with `query_type` `FindStocks`)
    - `FBst\d+` → stock ID (use `run_query` with `query_type` `FindStocks`)
+   - A split-GAL4 line name or synonym (e.g. `MB109B`, `SS04495`) → resolve first with `resolve_combination` to get its FBco, then `FindStocks` on the FBco
+   - A VFB split expression pattern (`VFBexp_FBtp…FBtp…` or one of its images) → use the `FindStocks` entry in its `get_term_info` `Queries` array; it is already anchored on the FBco (label `Find fly stocks for <name> (FBco…)`)
    - Any other string → resolve first with `resolve_entity`
 
 2. **Resolve entity** — If user provides a name (not an ID), call `resolve_entity` with the raw unresolved string exactly as written. It uses tiered resolution:
@@ -334,6 +337,11 @@ Call `list_search_facets` for valid type names — do not guess them, and do not
      ```
    - **≤30 rows:** Show full table
    - **>30 rows:** Show total stock count, allele count, breakdown by stock collection, top 20 rows sorted by collection then allele, note that results are truncated
+   - **Split combinations (FBco):** rows carry a `match` column, and only the best tier FlyBase has is returned:
+     - `Exact combination` — the stock carries both hemidrivers. If any exist, no other rows are returned.
+     - `Hemidriver alone` — otherwise, stocks of one hemidriver on its own.
+     - `Hemidriver in other combination` — for a hemidriver with no stock of its own, stocks pairing it with a different hemidriver.
+     Tiers 2 and 3 are chosen per hemidriver, so the two halves can come from different tiers. Say which tier the results are: exact stocks can be ordered as-is, while hemidriver stocks mean the user must cross the two halves to make the split (and a hemidriver from an "other combination" stock must first be separated from its partner). Do not describe hidden tiers as unavailable; they were filtered because a better tier exists.
    - For every stock, include FlyBase link: `https://flybase.org/reports/{FBst_ID}`
    - Include entity report link: `https://flybase.org/reports/{feature_id}`
 
@@ -350,7 +358,8 @@ Call `list_search_facets` for valid type names — do not guess them, and do not
 | FBgn (gene) | 4-path UNION: direct allele, allele→construct→insertion, allele→associated insertion, regulatory region |
 | FBal (allele) | 3-path UNION: direct, construct, associated insertion |
 | FBti (insertion) | Direct feature_genotype path |
-| FBco (combination) | Resolve component alleles first, then allele paths for each |
+| FBtp (construct) | Via its insertions, direct genotype membership, and alleles made from it |
+| FBco (combination) | Resolve component hemidrivers, run allele paths for each, then keep only the best tier (exact combination → hemidriver alone → hemidriver in other combination) |
 | FBst (stock) | Direct stock lookup |
 
 ---
