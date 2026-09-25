@@ -148,6 +148,8 @@ across rows; the default `unique: true` gives one row per term instead.
 }
 ```
 
+For a split-GAL4 combination, pass its FBco (e.g. `FBco0000061`, MB109B). Each row then has a `match` value (`Exact combination`, `Hemidriver alone` or `Hemidriver in other combination`), and only the best available tier is returned.
+
 ### 9. Resolve a Split-GAL4 Combination
 ```json
 {

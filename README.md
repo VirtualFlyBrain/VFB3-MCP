@@ -303,7 +303,7 @@ Execute predefined queries on VFB data.
 
 The response reports `count_status` alongside `count`: `exact` (count is the true total), `row_count` (no total supplied — count is just the rows returned), or `unavailable` (the query failed upstream and count is `-1`). A `-1` is an error indication, **not** an empty result set, and `_note` says so in words.
 
-FlyBase stocks and split-GAL4 combination publications are run_query query_types too: `FindStocks` and `FindComboPublications`.
+FlyBase stocks and split-GAL4 combination publications are run_query query_types too: `FindStocks` and `FindComboPublications`. For a split combination (FBco), `FindStocks` returns stocks with both hemidrivers where they exist, and otherwise falls back to stocks of each hemidriver; a `match` column says which.
 
 ### search_terms
 Search for VFB terms. This calls VFBquery's `/search`, which is the search virtualflybrain.org itself runs — the same Solr query, the same filters and boosts, the same final sort — so a result here is the result a user would see on the site. Deprecated terms are already excluded server-side; there is no need to ask for that.
