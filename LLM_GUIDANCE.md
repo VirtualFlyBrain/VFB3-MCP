@@ -175,7 +175,7 @@ Returns tabular data from pre-computed analyses:
   "rows": [
     {
       "id": "VFB_00102141",
-      "name": "[AOTU on JRC2018Unisex adult brain](https://v2.virtualflybrain.org/...)",
+      "name": "[AOTU on JRC2018Unisex adult brain](https://v3.virtualflybrain.org/...)",
       "type": "Expression_pattern"
     }
   ]
@@ -620,7 +620,7 @@ For `query_connectivity` the summary stats are already computed for you over the
 - "To see which brain regions this neuron connects to, I can run a region connectivity query."
 - "To find what connects *back* to this type, I can swap upstream/downstream."
 - "To aggregate by neuron class, I can re-run with group_by_class=true."
-- "You can view any neuron at `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
+- "You can view any neuron at `https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
 
 ---
 
@@ -693,7 +693,7 @@ When multiple matches are returned by any resolve tool, present a numbered list 
 ### Link Conventions
 Always provide appropriate links in results:
 - **FlyBase reports:** `https://flybase.org/reports/{ID}` (for FBgn, FBal, FBti, FBco, FBst, FBsn, FBrf IDs)
-- **VFB browser:** `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={VFB_ID}` (for VFB IDs)
+- **VFB browser:** `https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id={VFB_ID}` (for VFB IDs)
 - **DOI:** `https://doi.org/{DOI}`
 - **PubMed:** `https://pubmed.ncbi.nlm.nih.gov/{PMID}/`
 
@@ -739,7 +739,7 @@ VFB provides multiple types of images:
 The VFB browser can be opened with specific terms and 3D scenes using URL parameters:
 
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<FOCUS_ID>&i=<IMAGE_ID1>,<IMAGE_ID2>,...
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<FOCUS_ID>&i=<IMAGE_ID1>,<IMAGE_ID2>,...
 ```
 
 **Parameters:**
@@ -769,19 +769,19 @@ Each key is a template brain ID (e.g., `VFB_00101567` = JRC2018Unisex). The imag
 
 **View a single neuron on its template:**
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000001
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000001
 ```
 `VFB_00101567` (JRC2018Unisex template) is listed first in `i=`, followed by the neuron `VFB_00000001`. The `id=VFB_00000001` sets the focus to the neuron.
 
 **View multiple neurons together in 3D:**
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000333,VFB_00000001
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000333,VFB_00000001
 ```
 Multiple image IDs after the template ID will all be rendered together, provided they are all registered to `VFB_00101567`.
 
 **View just a term's info (no 3D scene):**
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=FBbt_00003624
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=FBbt_00003624
 ```
 Omitting the `i=` parameter opens the term info panel without loading a 3D scene.
 
