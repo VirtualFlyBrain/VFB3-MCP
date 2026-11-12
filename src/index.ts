@@ -10,7 +10,7 @@ import {
 import axios from 'axios';
 import cors from 'cors';
 import express from 'express';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { shapeRunQueryResult, runQueryFailed } from './runQueryShape.js';
 import { shapeCombineResult, shapeXrefResult } from './combineShape.js';
 
@@ -25,40 +25,55 @@ const GA_API_SECRET = process.env.GA_API_SECRET || '';
 const GA_ENABLED = !!(GA_MEASUREMENT_ID && GA_API_SECRET);
 const STDIO_CLIENT_ID = randomUUID(); // fallback client_id for stdio mode
 
-function trackToolCall(
-  toolName: string,
-  toolArgs: Record<string, unknown>,
-  sessionId?: string,
-  clientIp?: string
+/**
+ * Derive a stable GA4 client_id for a caller. HTTP mode is stateless (fresh
+ * Server per request, no session ID), so without this every distinct caller
+ * would collapse onto the single process-wide STDIO_CLIENT_ID. Hashing the
+ * client IP gives repeat callers from the same address a consistent
+ * client_id across requests, which is what GA4 needs to bucket users/
+ * sessions and to carry user_properties (e.g. mcp_client_name) forward onto
+ * later events from that same caller.
+ */
+function deriveClientId(clientIp?: string): string {
+  if (!clientIp || clientIp === 'unknown') return STDIO_CLIENT_ID;
+  return createHash('md5').update(clientIp).digest('hex');
+}
+
+/**
+ * Low-level GA4 Measurement Protocol sender. clientIp goes on the top-level
+ * ip_override field (not a custom event param) so GA4 can derive real
+ * geography — this is a server-to-server POST, so without ip_override GA
+ * would otherwise geo-locate every event to this server's own egress IP.
+ */
+function sendGaEvent(
+  eventName: string,
+  params: Record<string, string>,
+  clientId: string,
+  clientIp?: string,
+  userProperties?: Record<string, { value: string }>
 ): void {
   if (!GA_ENABLED) return;
 
-  const clientId = sessionId || STDIO_CLIENT_ID;
-
-  // Flatten tool args into GA4 params with arg_ prefix, truncated to 100 chars
-  const argSummary: Record<string, string> = {};
-  for (const [key, value] of Object.entries(toolArgs)) {
-    const strValue = typeof value === 'string' ? value : JSON.stringify(value);
-    argSummary[`arg_${key}`] = strValue.slice(0, 100);
-  }
-
-  const payload = {
+  const payload: Record<string, unknown> = {
     client_id: clientId,
     events: [
       {
-        name: 'mcp_tool_call',
+        name: eventName,
         params: {
           session_id: clientId,
           engagement_time_msec: '100',
-          tool_name: toolName,
-          server_version: VERSION,
-          mcp_mode: process.env.MCP_MODE || 'stdio',
-          ...(clientIp ? { client_ip: clientIp } : {}),
-          ...argSummary,
+          ...params,
         },
       },
     ],
   };
+
+  if (clientIp && clientIp !== 'unknown') {
+    payload.ip_override = clientIp;
+  }
+  if (userProperties) {
+    payload.user_properties = userProperties;
+  }
 
   // Fire-and-forget: do not await, swallow all errors
   axios
@@ -69,6 +84,65 @@ function trackToolCall(
     .catch(() => {});
 }
 
+function trackToolCall(
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  clientId: string,
+  clientIp?: string
+): void {
+  if (!GA_ENABLED) return;
+
+  // Flatten tool args into GA4 params with arg_ prefix, truncated to 100 chars
+  const argSummary: Record<string, string> = {};
+  for (const [key, value] of Object.entries(toolArgs)) {
+    const strValue = typeof value === 'string' ? value : JSON.stringify(value);
+    argSummary[`arg_${key}`] = strValue.slice(0, 100);
+  }
+
+  sendGaEvent(
+    'mcp_tool_call',
+    {
+      tool_name: toolName,
+      server_version: VERSION,
+      mcp_mode: process.env.MCP_MODE || 'stdio',
+      ...argSummary,
+    },
+    clientId,
+    clientIp
+  );
+}
+
+/**
+ * Fired once per MCP `initialize` handshake (via server.oninitialized).
+ * clientInfo.name/version identify which MCP client is connecting (Claude
+ * Code, Claude.ai, Codex, a third-party scanner, ...) — captured as GA4
+ * user_properties (persistent per client_id) rather than a one-off event
+ * param, so it's usable for segmentation/audiences across every later event
+ * from that same caller, not just the initialize event itself.
+ */
+function trackClientInfo(
+  clientInfo: { name?: string; version?: string; title?: string } | undefined,
+  clientId: string,
+  clientIp?: string
+): void {
+  if (!GA_ENABLED || !clientInfo) return;
+
+  sendGaEvent(
+    'mcp_session_start',
+    {
+      mcp_mode: process.env.MCP_MODE || 'stdio',
+      client_name: (clientInfo.name || 'unknown').slice(0, 100),
+      client_version: (clientInfo.version || 'unknown').slice(0, 100),
+    },
+    clientId,
+    clientIp,
+    {
+      mcp_client_name: { value: (clientInfo.name || 'unknown').slice(0, 36) },
+      mcp_client_version: { value: (clientInfo.version || 'unknown').slice(0, 36) },
+    }
+  );
+}
+
 /**
  * Expand batch tool calls into individual tracking events so every
  * ID / query pair gets its own GA4 row with batch_size + batch_index.
@@ -76,14 +150,14 @@ function trackToolCall(
 function trackBatchToolCalls(
   toolName: string,
   toolArgs: Record<string, unknown>,
-  sessionId?: string,
+  clientId: string,
   clientIp?: string
 ): void {
   if (toolName === 'get_term_info') {
     const id = toolArgs.id;
     if (Array.isArray(id)) {
       for (let i = 0; i < id.length; i++) {
-        trackToolCall(toolName, { id: id[i], batch_size: id.length, batch_index: i }, sessionId, clientIp);
+        trackToolCall(toolName, { id: id[i], batch_size: id.length, batch_index: i }, clientId, clientIp);
       }
       return;
     }
@@ -96,25 +170,26 @@ function trackBatchToolCalls(
 
     if (queries && Array.isArray(queries) && queries.length > 0) {
       for (let i = 0; i < queries.length; i++) {
-        trackToolCall(toolName, { id: queries[i].id, query_type: queries[i].query_type, batch_size: queries.length, batch_index: i }, sessionId, clientIp);
+        trackToolCall(toolName, { id: queries[i].id, query_type: queries[i].query_type, batch_size: queries.length, batch_index: i }, clientId, clientIp);
       }
       return;
     }
     if (Array.isArray(id) && queryType) {
       for (let i = 0; i < id.length; i++) {
-        trackToolCall(toolName, { id: id[i], query_type: queryType, batch_size: id.length, batch_index: i }, sessionId, clientIp);
+        trackToolCall(toolName, { id: id[i], query_type: queryType, batch_size: id.length, batch_index: i }, clientId, clientIp);
       }
       return;
     }
   }
 
   // Single call — pass through as-is
-  trackToolCall(toolName, toolArgs, sessionId, clientIp);
+  trackToolCall(toolName, toolArgs, clientId, clientIp);
 }
 
 interface RequestContext {
   id?: string;
   clientIp?: string;
+  clientId?: string;
 }
 
 function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
@@ -124,7 +199,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
       tools: [
         {
           name: 'get_term_info',
-          description: 'Get term info for a VFB or anatomy ontology entity (VFB_*, FBbt_*, etc.). THIS IS THE QUERY DISCOVERY TOOL: the response\'s "Queries" array lists the valid query_type values that run_query accepts for this entity. ALWAYS call get_term_info before run_query unless you already obtained the query_type from a previous get_term_info call in this conversation. Returns: SuperTypes (classification), Tags (data flags like has_image, has_neuron_connectivity), Queries (valid query_types for run_query), RelatedTools (other MCP tools applicable to this entity, with default_args ready to copy — e.g. get_hierarchy with subclass_of for cell types or part_of for nervous-system regions), Images (keyed by template brain ID), Publications, Synonyms. Supports batch — pass an array of IDs to fetch in parallel; batch results are returned as a JSON object keyed by ID. To build VFB browser URLs from the Images field: https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<VFB_ID>&i=<TEMPLATE_ID>,<IMAGE_ID1>,<IMAGE_ID2> — id= sets the focus term and i= lists images for the 3D viewer (template ID must be first in i= to set the coordinate space).',
+          description: 'Get term info for a VFB or anatomy ontology entity (VFB_*, FBbt_*, etc.). THIS IS THE QUERY DISCOVERY TOOL: the response\'s "Queries" array lists the valid query_type values that run_query accepts for this entity. ALWAYS call get_term_info before run_query unless you already obtained the query_type from a previous get_term_info call in this conversation. Returns: SuperTypes (classification), Tags (data flags like has_image, has_neuron_connectivity), Queries (valid query_types for run_query), RelatedTools (other MCP tools applicable to this entity, with default_args ready to copy — e.g. get_hierarchy with subclass_of for cell types or part_of for nervous-system regions), Images (keyed by template brain ID), Publications, Synonyms. Supports batch — pass an array of IDs to fetch in parallel; batch results are returned as a JSON object keyed by ID. To build VFB browser URLs from the Images field: https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<VFB_ID>&i=<TEMPLATE_ID>,<IMAGE_ID1>,<IMAGE_ID2> — id= sets the focus term and i= lists images for the 3D viewer (template ID must be first in i= to set the coordinate space).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -145,7 +220,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'run_query',
-          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type". Results are PAGED: the first 25 rows by default (change with limit/offset) plus the true total as "count". ALWAYS read "count_status" before quoting "count": "exact" means count is the true total; "unavailable" means the query FAILED upstream and count is -1, which is NOT zero and must never be reported as "no results" — read "_note" and tell the user the query could not be run. Image/thumbnail columns are excluded by default to save space - pass include_images=true to include them. FlyBase integration is via query_types too: FindStocks (fly stocks for a FlyBase feature ID - FBgn/FBal/FBti/FBtp/FBco/FBst) and FindComboPublications (publications for an FBco split-GAL4 combination). Get those IDs from resolve_entity / resolve_combination first, then run_query with the ID and the query_type. Include FlyBase links in output: https://flybase.org/reports/{ID}.',
+          description: 'Run a pre-computed query on a VFB entity. REQUIRED WORKFLOW: (1) call get_term_info on the ID first; (2) read the response\'s "Queries" array; (3) pass one of those values as query_type. Calling run_query with a guessed query_type will return an error. If a query returns empty rows or an error, the entity does not support that query_type or has no data for it — try a different query_type from the Queries array, or try a related entity (e.g. its parent class via get_hierarchy). Empty results do NOT mean the answer is unknown — only that this call did not return it. NEVER fabricate results from training data when a query is empty; tell the user clearly what was tried. NEVER pass tool names like "get_term_info" or "search_terms" as query_type — those are separate tools. Common query_types by entity kind: PaintedDomains, AllAlignedImages, AlignedDatasets, AllDatasets (templates); SimilarMorphologyTo, NeuronInputsTo, NeuronNeuronConnectivityQuery, NeuronRegionConnectivityQuery (individual neurons); ListAllAvailableImages, SubclassesOf, PartsOf, NeuronsPartHere, NeuronsSynaptic, ExpressionOverlapsHere, DownstreamClassConnectivity, UpstreamClassConnectivity (classes). Supports batch — pass an array of IDs (same query_type) or a "queries" array of {id, query_type} pairs; batch results are keyed by "ID::query_type". Results are PAGED: the first 25 rows by default (change with limit/offset) plus the true total as "count". ALWAYS read "count_status" before quoting "count": "exact" means count is the true total; "unavailable" means the query FAILED upstream and count is -1, which is NOT zero and must never be reported as "no results" — read "_note" and tell the user the query could not be run. Image/thumbnail columns are excluded by default to save space - pass include_images=true to include them. FlyBase integration is via query_types too: FindStocks (fly stocks for a FlyBase feature ID - FBgn/FBal/FBti/FBtp/FBco/FBst; for an FBco split combination only the best tier is returned, labelled in a "match" column: Exact combination, else per hemidriver Hemidriver alone, else Hemidriver in other combination) and FindComboPublications (publications for an FBco split-GAL4 combination). Get those IDs from resolve_entity / resolve_combination first, then run_query with the ID and the query_type. Include FlyBase links in output: https://flybase.org/reports/{ID}.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -302,7 +377,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'query_connectivity',
-          description: 'Query synaptic connectivity between Drosophila neuron classes across ALL connectome datasets simultaneously for comparative connectomics. This is NOT pre-cached — it runs live queries, so expect slow responses (up to several minutes). Set both upstream_type AND downstream_type to filter connections between two specific neuron classes (e.g., "What Tm1→T3 connections exist across all datasets?"). At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections — for pre-computed connections of a single individual neuron, use run_query with NeuronNeuronConnectivityQuery instead. NOT for muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. For both-ends queries, start with weight≥50 to avoid timeouts. RESULT SIZE: a broad query is enormous (a single class at weight=5 can be over 50,000 connections), so results are ranked strongest-first and paged — you get limit rows (default 50) plus a summary computed over ALL of them: totals, per-dataset counts, distinct neuron counts, and the top class pairs. Answer from the summary and quote a handful of rows; only page with offset if the user asks for specific further rows. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. group_by_class=true is usually the better first call on a broad query: it aggregates to class pairs instead of returning every neuron pair.',
+          description: 'Query synaptic connectivity between Drosophila neuron classes across ALL connectome datasets simultaneously for comparative connectomics. This is NOT pre-cached — it runs live queries, so expect slow responses (up to several minutes). Set both upstream_type AND downstream_type to filter connections between two specific neuron classes (e.g., "What Tm1→T3 connections exist across all datasets?"). At least one of upstream_type or downstream_type is required. CONSTRAINTS: Only accepts neuron class terms (OWL IDs like FBbt_00003789 or labels like "transmedullary neuron Tm1") — anatomical regions or neuropils (e.g., "lobula", "medulla") are NOT accepted. NOT suitable for individual neuron-to-neuron connections — for pre-computed connections of a single individual neuron, use run_query with NeuronNeuronConnectivityQuery instead. NOT for muscle/sense organ connections. RECOMMENDED DEFAULTS: weight=5, exclude_dbs=["hb","fafb"] unless user specifies otherwise. For both-ends queries, start with weight≥50 to avoid timeouts. RESULT SIZE: a broad query is enormous (a single class at weight=5 can be over 50,000 connections), so results are ranked strongest-first and paged — you get limit rows (default 50) plus a summary computed over ALL of them: totals, per-dataset counts, distinct neuron counts, and the top class pairs. Answer from the summary and quote a handful of rows; only page with offset if the user asks for specific further rows. WORKFLOW: Confirm parameters with user before querying. Use search_terms with filter_types ["neuron","class"] to validate/canonicalize neuron type labels. If zero results, try relaxation: lower weight to 1, then remove exclude_dbs filter, then try group_by_class=true — report what worked and let user decide. group_by_class=true is usually the better first call on a broad query: it rolls the connections up over the subclass hierarchy — a row per (upstream level, downstream level) with data, up to the queried term(s) — instead of returning every neuron pair. Because a connection counts toward every ancestor pair in scope, per-row pairwise_connections and total_weight do NOT sum to the raw connection counts, and a row appears for the queried class itself as well as each subclass with data.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -320,7 +395,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               },
               group_by_class: {
                 type: 'boolean',
-                description: 'If true, aggregate results by neuron class — returns total_weight, average_weight, percent_connected per class pair, ranked by pairwise_connections. If false (default), returns individual neuron-to-neuron rows.',
+                description: 'If true, aggregate by class rolled up over the subclass hierarchy: a row appears for the queried class AND each subclass with data (a connection counts toward every ancestor pair up to the queried term(s), so per-row pairwise_connections / total_weight do not sum to the raw counts). Returns total_weight, average_weight, percent_connected and pairwise_connections per class pair, ranked by pairwise_connections. If false (default), returns individual neuron-to-neuron rows.',
               },
               exclude_dbs: {
                 type: 'array',
@@ -338,6 +413,54 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
                 default: 0,
               },
             },
+          },
+        },
+        {
+          name: 'get_predicted_neurotransmitters',
+          description: 'Get the PREDICTED neurotransmitter(s) for a Drosophila neuron class — itself or any subclass — from per-instance connectome predictions (each reconstructed neuron carries a predicted transmitter with a confidence). Use this for "what neurotransmitter does <cell type> use?" when you want the data-driven prediction and its confidence. By default results are aggregated to flat per-class rows (one per cell type × neurotransmitter) with instance counts, percent_of_class and mean_confidence; set aggregate=false for one row per individual neuron. Set split_by_dataset=true to get one row per (cell type, neurotransmitter, dataset) so you can see agreement across connectomes. The neurotransmitter is reported as a GO secretion term (nt_id/nt_label), the same id space as get_known_neurotransmitters. This is distinct from get_known_neurotransmitters, which returns the ontology-curated classification without confidence. CONSTRAINTS: neuron class terms only (FBbt id or label); use search_terms with filter_types ["neuron","class"] to canonicalize. RECOMMENDED: exclude_dbs defaults to ["hb","fafb"]; pass [] for all datasets.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              neuron_type: {
+                type: 'string',
+                description: 'Neuron class — OWL ID (e.g. "FBbt_00003797") or label (e.g. "Tm9"). Means the class and all of its subclasses.',
+              },
+              aggregate: {
+                type: 'boolean',
+                description: 'If true (default), aggregate to flat per-class rows {cell_type_id, cell_type, nt_id, nt_label, instances, percent_of_class, mean_confidence}. If false, return one row per individual neuron {..., neuron_id, neuron_name, confidence, references, dataset}.',
+                default: true,
+              },
+              split_by_dataset: {
+                type: 'boolean',
+                description: 'If true (aggregate only), emit one row per (cell type, neurotransmitter, dataset) with a dataset column, so cross-connectome agreement is visible. Default false aggregates over all included datasets.',
+                default: false,
+              },
+              exclude_dbs: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Dataset symbols to exclude (default ["hb","fafb"]). Pass [] to include all datasets. Same symbols as query_connectivity / list_connectome_datasets.',
+              },
+              min_confidence: {
+                type: 'number',
+                description: 'Drop predictions below this confidence (0..1). Default 0 (keep all).',
+                default: 0,
+              },
+            },
+            required: ['neuron_type'],
+          },
+        },
+        {
+          name: 'get_known_neurotransmitters',
+          description: 'Get the KNOWN (curated) neurotransmitter(s) for a Drosophila neuron class and its subclasses, from the ontology\'s classification rather than per-instance predictions — so there is no confidence. Use this for "what neurotransmitter is <cell type> known to use?" when you want the curated/established answer. Returns one row per (cell type, neurotransmitter): {cell_type_id, cell_type, nt_id, nt_label}, where the neurotransmitter is a GO secretion term (same id space as get_predicted_neurotransmitters). Empty when the ontology asserts none — in that case try get_predicted_neurotransmitters for the data-driven prediction. CONSTRAINTS: neuron class terms only (FBbt id or label); use search_terms with filter_types ["neuron","class"] to canonicalize.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              neuron_type: {
+                type: 'string',
+                description: 'Neuron class — OWL ID (e.g. "FBbt_00003797") or label (e.g. "Tm9"). Means the class and all of its subclasses.',
+              },
+            },
+            required: ['neuron_type'],
           },
         },
         {
@@ -446,9 +569,9 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
       : 1;
     console.error(`MCP Debug: Received CallTool request for tool: ${name} (batch_size=${batchSize}) client_ip=${sessionIdHolder?.clientIp || 'unknown'} with args:`, JSON.stringify(args));
 
-    const sid = sessionIdHolder?.id;
+    const cid = sessionIdHolder?.clientId || STDIO_CLIENT_ID;
     const cip = sessionIdHolder?.clientIp;
-    trackBatchToolCalls(name, args || {}, sid, cip);
+    trackBatchToolCalls(name, args || {}, cid, cip);
 
     try {
       switch (name) {
@@ -468,6 +591,10 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           return await handleListConnectomeDatasets();
         case 'query_connectivity':
           return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[]; limit?: number; offset?: number });
+        case 'get_predicted_neurotransmitters':
+          return await handleGetPredictedNeurotransmitters(args as { neuron_type: string; aggregate?: boolean; split_by_dataset?: boolean; exclude_dbs?: string[]; min_confidence?: number });
+        case 'get_known_neurotransmitters':
+          return await handleGetKnownNeurotransmitters(args as { neuron_type: string });
         case 'get_hierarchy':
           return await handleGetHierarchy(args as { id: string; relationship: string; direction?: string; max_depth?: number });
         case 'lookup_xref':
@@ -1303,6 +1430,52 @@ async function handleQueryConnectivity(args: {
   }
 }
 
+async function handleGetPredictedNeurotransmitters(args: {
+  neuron_type: string;
+  aggregate?: boolean;
+  split_by_dataset?: boolean;
+  exclude_dbs?: string[];
+  min_confidence?: number;
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const params = new URLSearchParams();
+  params.set('neuron_type', args.neuron_type);
+  if (args.aggregate !== undefined) params.set('aggregate', String(args.aggregate));
+  if (args.split_by_dataset !== undefined) params.set('split_by_dataset', String(args.split_by_dataset));
+  if (args.exclude_dbs) params.set('exclude_dbs', args.exclude_dbs.join(','));
+  if (args.min_confidence !== undefined) params.set('min_confidence', String(args.min_confidence));
+  const url = `${VFBQUERY_BASE}/get_predicted_neurotransmitters?${params.toString()}`;
+  console.error(`MCP Debug: get_predicted_neurotransmitters params=${params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 300000 }); // 5 min — live subclass expansion + scan
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Predicted-neurotransmitter query rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error querying predicted neurotransmitters: ${error}` }] };
+  }
+}
+
+async function handleGetKnownNeurotransmitters(args: {
+  neuron_type: string;
+}): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const params = new URLSearchParams();
+  params.set('neuron_type', args.neuron_type);
+  const url = `${VFBQUERY_BASE}/get_known_neurotransmitters?${params.toString()}`;
+  console.error(`MCP Debug: get_known_neurotransmitters params=${params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 300000 }); // 5 min — live subclass expansion
+    return { content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }] };
+  } catch (error) {
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Known-neurotransmitter query rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error querying known neurotransmitters: ${error}` }] };
+  }
+}
+
 async function handleGetHierarchy(args: {
   id: string;
   relationship: string;
@@ -1470,6 +1643,10 @@ function createServer(sessionIdHolder?: RequestContext): Server {
       },
     }
   );
+  server.oninitialized = () => {
+    const clientId = sessionIdHolder?.clientId || STDIO_CLIENT_ID;
+    trackClientInfo(server.getClientVersion(), clientId, sessionIdHolder?.clientIp);
+  };
   setupToolHandlers(server, sessionIdHolder);
   return server;
 }
@@ -1500,10 +1677,14 @@ function getHtmlPage(): string {
   <p>A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB) APIs. This server provides tools to query VFB data, run queries, and search for terms.</p>
 
   <div class="endpoint">
-    <strong>MCP Endpoint:</strong> <code>https://vfb3-mcp.virtualflybrain.org</code>
+    <strong>MCP Endpoint:</strong> <code>https://vfb3-mcp.virtualflybrain.org</code><br>
+    <strong>Canonical repository:</strong> <a href="https://github.com/VirtualFlyBrain/VFB3-MCP">github.com/VirtualFlyBrain/VFB3-MCP</a>
   </div>
 
   <h2>🚀 Quick Start</h2>
+
+  <p>Add the hosted server in one command. There is no API key and no account to create.</p>
+  <pre><code>claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org</code></pre>
 
   <h3>Claude Desktop Setup</h3>
   <ol>
@@ -1532,6 +1713,7 @@ function getHtmlPage(): string {
   </div>
 
   <h3>Claude Code Setup</h3>
+  <p>Either run <code>claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org</code>, or edit the configuration file by hand:</p>
   <ol>
     <li class="step"><strong>Locate your Claude configuration file</strong>:
       <ul>
@@ -1728,7 +1910,11 @@ async function runHttpMode() {
       // Create a fresh server and transport for every request.
       // sessionIdGenerator: undefined = stateless mode — no session ID is
       // generated, returned, or validated. Any replica can handle any request.
-      const server = createServer({ clientIp });
+      // clientId is derived from clientIp so repeat callers from the same
+      // address share a stable GA4 client_id across these otherwise-unlinked
+      // requests, instead of every caller collapsing onto STDIO_CLIENT_ID.
+      const clientId = deriveClientId(clientIp);
+      const server = createServer({ clientIp, clientId });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,

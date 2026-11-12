@@ -39,7 +39,7 @@ Currently `get_term_info` surfaces:
 
 - `get_hierarchy` — for cell-type classes (`subclass_of`) and nervous-system regions (`part_of`).
 
-FlyBase stocks and split-GAL4 combination publications are NOT RelatedTools — they are `run_query` query_types (`FindStocks` for FlyBase feature IDs FBgn/FBal/FBti/FBtp/FBco/FBst, and `FindComboPublications` for FBco combinations), offered in the `Queries` array of those terms. Get the FlyBase/FBco ID from `resolve_entity` / `resolve_combination` first, then call `run_query` with that ID and the query_type.
+FlyBase stocks and split-GAL4 combination publications are NOT RelatedTools — they are `run_query` query_types (`FindStocks` for FlyBase feature IDs FBgn/FBal/FBti/FBtp/FBco/FBst and strains FBsn, and `FindComboPublications` for FBco combinations), offered in the `Queries` array of those terms. Get the FlyBase/FBco ID from `resolve_entity` / `resolve_combination` first, then call `run_query` with that ID and the query_type.
 
 Call the named tool directly with `default_args` — do not pass these values via `run_query`.
 
@@ -69,7 +69,7 @@ If the MCP cannot answer, tell the user clearly:
 
 DO NOT fabricate any of the following from training data:
 
-- FlyBase IDs (`FBgn`, `FBal`, `FBti`, `FBco`, `FBst`, `FBrf`)
+- FlyBase IDs (`FBgn`, `FBal`, `FBti`, `FBco`, `FBst`, `FBsn`, `FBrf`)
 - Anatomy ontology IDs (`FBbt_*`)
 - VFB IDs (`VFB_*`)
 - Driver line names, allele names, or split-GAL4 combination names
@@ -195,7 +195,7 @@ Returns tabular data from pre-computed analyses:
   "rows": [
     {
       "id": "VFB_00102141",
-      "name": "[AOTU on JRC2018Unisex adult brain](https://v2.virtualflybrain.org/...)",
+      "name": "[AOTU on JRC2018Unisex adult brain](https://v3.virtualflybrain.org/...)",
       "type": "Expression_pattern"
     }
   ]
@@ -327,8 +327,13 @@ Call `list_search_facets` for valid type names — do not guess them, and do not
    - `FBgn\d+` → gene ID (use `run_query` with `query_type` `FindStocks`)
    - `FBal\d+` → allele ID (use `run_query` with `query_type` `FindStocks`)
    - `FBti\d+` → insertion ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBtp\d+` → transgenic construct ID (use `run_query` with `query_type` `FindStocks`)
    - `FBco\d+` → combination ID (use `run_query` with `query_type` `FindStocks`)
    - `FBst\d+` → stock ID (use `run_query` with `query_type` `FindStocks`)
+   - `FBsn\d+` → strain ID, e.g. a DGRP line or Canton-S (use `run_query` with `query_type` `FindStocks`: the stock-centre stocks derived from the strain)
+   - A strain name (e.g. `DGRP-304`, `Canton-S`) → `resolve_entity` does not cover strains; try `search_terms` for the strain and use the `FindStocks` entry in its `get_term_info` `Queries` array. If search does not find it, ask the user for the FlyBase strain ID (`FBsn…`) rather than guessing one
+   - A split-GAL4 line name or synonym (e.g. `MB109B`, `SS04495`) → resolve first with `resolve_combination` to get its FBco, then `FindStocks` on the FBco
+   - A VFB split expression pattern (`VFBexp_FBtp…FBtp…` or one of its images) → use the `FindStocks` entry in its `get_term_info` `Queries` array; it is already anchored on the FBco (label `Find fly stocks for <name> (FBco…)`)
    - Any other string → resolve first with `resolve_entity`
 
 2. **Resolve entity** — If user provides a name (not an ID), call `resolve_entity` with the raw unresolved string exactly as written. It uses tiered resolution:
@@ -354,6 +359,11 @@ Call `list_search_facets` for valid type names — do not guess them, and do not
      ```
    - **≤30 rows:** Show full table
    - **>30 rows:** Show total stock count, allele count, breakdown by stock collection, top 20 rows sorted by collection then allele, note that results are truncated
+   - **Split combinations (FBco):** rows carry a `match` column, and only the best tier FlyBase has is returned:
+     - `Exact combination` — the stock carries both hemidrivers. If any exist, no other rows are returned.
+     - `Hemidriver alone` — otherwise, stocks of one hemidriver on its own.
+     - `Hemidriver in other combination` — for a hemidriver with no stock of its own, stocks pairing it with a different hemidriver.
+     Tiers 2 and 3 are chosen per hemidriver, so the two halves can come from different tiers. Say which tier the results are: exact stocks can be ordered as-is, while hemidriver stocks mean the user must cross the two halves to make the split (and a hemidriver from an "other combination" stock must first be separated from its partner). Do not describe hidden tiers as unavailable; they were filtered because a better tier exists.
    - For every stock, include FlyBase link: `https://flybase.org/reports/{FBst_ID}`
    - Include entity report link: `https://flybase.org/reports/{feature_id}`
 
@@ -370,8 +380,45 @@ Call `list_search_facets` for valid type names — do not guess them, and do not
 | FBgn (gene) | 4-path UNION: direct allele, allele→construct→insertion, allele→associated insertion, regulatory region |
 | FBal (allele) | 3-path UNION: direct, construct, associated insertion |
 | FBti (insertion) | Direct feature_genotype path |
-| FBco (combination) | Resolve component alleles first, then allele paths for each |
+| FBtp (construct) | Via its insertions, direct genotype membership, and alleles made from it |
+| FBco (combination) | Resolve component hemidrivers, run allele paths for each, then keep only the best tier (exact combination → hemidriver alone → hemidriver in other combination) |
 | FBst (stock) | Direct stock lookup |
+| FBsn (strain) | The centre stocks FlyBase records as derived from the strain (strainprop `derived_stock_strain_<centre>`) |
+
+## Single-cell Transcriptomics (scRNAseq)
+
+**When to use:** User asks which cell types or genes have scRNAseq data, what a dataset sequenced, which stages or tissues a cluster came from, or what scRNAseq data exists for a fly stock, strain or allele.
+
+VFB's scRNAseq data is curated in [vfb-scRNAseq](https://github.com/VirtualFlyBrain/vfb-scRNAseq), with `VFBseq_` ids (the old `FBlc` ids are gone). Each dataset has:
+
+- **Clusters** — the authors' clusters, each *composed primarily of* one FBbt cell type. Clusters no FBbt term fits were left out, so every cluster has a cell type.
+- **Clusterings** — the authors' analyses, each with its Clusters and the Samples its cells came from. A dataset can have several (e.g. one per stage), and a Clustering can use Samples curated under another dataset.
+- **Samples** — the dissected tissue: stage, tissue, sex, and the FlyBase stock (`FBst`), strain (`FBsn`) or genetic entities (`FBal`/`FBco`…, for crosses) of the flies.
+- **Assays** — the sequencing libraries of each Sample, with GEO, SRA and BioSample links.
+
+As always, take query types from the term's `get_term_info` `Queries` array:
+
+| Question | Start from | `query_type` |
+|---|---|---|
+| Clusters of a cell type | the FBbt class | `anatScRNAseqQuery` |
+| Clusters expressing a gene | the gene (FBgn) | `expressionCluster` |
+| Genes expressed in a cluster | the Cluster | `clusterExpression` |
+| A dataset's clusters / clusterings / samples / assays | the Dataset | `scRNAdatasetData` / `ClusteringsInDataset` / `SamplesInDataset` / `AssaysInDataset` |
+| A clustering's clusters / samples / assays | the Clustering | `ClustersInClustering` / `SamplesInClustering` / `AssaysInClustering` |
+| Which clusterings used a sample | the Sample | `ClusteringsWithSample` |
+| scRNAseq data from particular flies | the stock, strain, allele or split combination | `ScRNAseqSamplesFrom`, `ScRNAseqClustersFrom` |
+
+**Reading the stage and tissue columns** — stage and tissue are recorded on Samples:
+
+- `cluster_stage` ("Cluster stage (from expression)") is a stage the cluster itself was given from its gene expression. It is usually empty.
+- `sample_stages` / `sample_tissues` ("Stages / Tissues of samples") are those of the Samples of the cluster's Clustering. They say what the clustering was built from, **not** that the cluster has cells from each stage or tissue. Do not tell the user a cluster contains cells of a stage on that basis alone.
+- Several stages of one period are shown as the narrowest stage covering them, never broader than embryonic, larval, prepupal, pupal, pharate adult or adult stage. So *adult stage* there can mean "adults of several ages"; check `SamplesInClustering` for the exact ages.
+- A cluster's location is its cell type (`anatomy` / `cell_type`), not its Samples' tissue.
+
+**Caveats:**
+- `ScRNAseqClustersFrom` lists clusters of every Clustering that uses those Samples. A Clustering can pool several genotypes (e.g. 35 DGRP lines), so a cluster's cells need not all come from that stock or strain; say so.
+- Expression `expression_extent` is the fraction of the cluster's cells expressing the gene, and only genes with extent > 0.2 are loaded. `expression_level` is the mean (counts per million) over the cells that express the gene.
+- To find scRNAseq-bearing terms, filter `search_terms` with `hasscrnaseq`.
 
 ---
 
@@ -455,6 +502,11 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 - First use `search_terms` with `filter_types: ["neuron", "class"]` to find neuron classes in that region.
 - Then apply Rule 2 for the neuron classes found.
 
+**Rule 4 — User asks what neurotransmitter a neuron type uses (e.g. "Is Tm9 cholinergic?", "What NT does the moonwalker DN release?"):**
+- For the **data-driven prediction** with confidence → use `get_predicted_neurotransmitters` (per-instance connectome predictions; aggregated to the class by default, `split_by_dataset` to compare connectomes, `aggregate: false` for per-neuron rows).
+- For the **curated/established** classification (no confidence) → use `get_known_neurotransmitters`.
+- Both take a neuron class name or FBbt ID (covering its subclasses) and report the neurotransmitter as a GO secretion term, so their answers line up. If known-NT is empty, fall back to the prediction. These are the right tools for the NT of a whole *type*; for a single individual neuron's inputs' NTs, Rule 1's `NeuronInputsTo` still applies.
+
 **If unsure**, start with the `run_query` options listed in Rules 1–2. They are fast and cached. Only use `query_connectivity` when dual-end class filtering is specifically needed.
 
 ### Summary Table
@@ -467,6 +519,8 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 | `DownstreamClassConnectivity` | Neuron class FBbt ID | Downstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `UpstreamClassConnectivity` | Neuron class FBbt ID | Upstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `query_connectivity` | Neuron class names or FBbt IDs | Connections between two neuron classes (includes data from all datasets) | Slow (1–5 min, live) |
+| `get_predicted_neurotransmitters` | Neuron class name or FBbt ID | Predicted NT(s) per class (or per instance), with mean confidence, as GO terms; optional per-dataset split | Live (seconds) |
+| `get_known_neurotransmitters` | Neuron class name or FBbt ID | Curated NT(s) for the class and subclasses, as GO terms (no confidence) | Live (seconds) |
 
 None of these answers a question about **set membership across two regions** — "which neurons have a part in both the calyx and the lateral horn" is not a connectivity question at all. That is `combine_queries` over two `NeuronsPartHere` operands; see *Set Operations* under Cross-tool Patterns.
 
@@ -588,7 +642,7 @@ For `query_connectivity` the summary stats are already computed for you over the
 - "To see which brain regions this neuron connects to, I can run a region connectivity query."
 - "To find what connects *back* to this type, I can swap upstream/downstream."
 - "To aggregate by neuron class, I can re-run with group_by_class=true."
-- "You can view any neuron at `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
+- "You can view any neuron at `https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
 
 ---
 
@@ -660,8 +714,8 @@ When multiple matches are returned by any resolve tool, present a numbered list 
 
 ### Link Conventions
 Always provide appropriate links in results:
-- **FlyBase reports:** `https://flybase.org/reports/{ID}` (for FBgn, FBal, FBti, FBco, FBst, FBrf IDs)
-- **VFB browser:** `https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id={VFB_ID}` (for VFB IDs)
+- **FlyBase reports:** `https://flybase.org/reports/{ID}` (for FBgn, FBal, FBti, FBco, FBst, FBsn, FBrf IDs)
+- **VFB browser:** `https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id={VFB_ID}` (for VFB IDs)
 - **DOI:** `https://doi.org/{DOI}`
 - **PubMed:** `https://pubmed.ncbi.nlm.nih.gov/{PMID}/`
 
@@ -732,7 +786,7 @@ VFB provides multiple types of images:
 The VFB browser can be opened with specific terms and 3D scenes using URL parameters:
 
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<FOCUS_ID>&i=<IMAGE_ID1>,<IMAGE_ID2>,...
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=<FOCUS_ID>&i=<IMAGE_ID1>,<IMAGE_ID2>,...
 ```
 
 **Parameters:**
@@ -762,19 +816,19 @@ Each key is a template brain ID (e.g., `VFB_00101567` = JRC2018Unisex). The imag
 
 **View a single neuron on its template:**
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000001
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000001
 ```
 `VFB_00101567` (JRC2018Unisex template) is listed first in `i=`, followed by the neuron `VFB_00000001`. The `id=VFB_00000001` sets the focus to the neuron.
 
 **View multiple neurons together in 3D:**
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000333,VFB_00000001
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=VFB_00000001&i=VFB_00101567,VFB_00000333,VFB_00000001
 ```
 Multiple image IDs after the template ID will all be rendered together, provided they are all registered to `VFB_00101567`.
 
 **View just a term's info (no 3D scene):**
 ```
-https://v2.virtualflybrain.org/org.geppetto.frontend/geppetto?id=FBbt_00003624
+https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id=FBbt_00003624
 ```
 Omitting the `i=` parameter opens the term info panel without loading a 3D scene.
 

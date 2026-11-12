@@ -1,6 +1,17 @@
 # VFB3-MCP Server
 
-A Model Context Protocol (MCP) server for interacting with VirtualFlyBrain (VFB) APIs. This server provides tools to query VFB data, run queries, and search for terms. In HTTP mode it runs statelessly (no session tracking), so any replica can handle any request and standard load balancing works.
+A Model Context Protocol (MCP) server for Virtual Fly Brain (VFB): query *Drosophila melanogaster* neuroanatomy, connectomics, expression and reagent data from Claude, Copilot or any other MCP client.
+
+**Canonical repository:** [VirtualFlyBrain/VFB3-MCP](https://github.com/VirtualFlyBrain/VFB3-MCP) (this one) — maintained by the Virtual Fly Brain team.
+**Hosted service:** `https://vfb3-mcp.virtualflybrain.org` — no installation, no API key, no account.
+
+```bash
+claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org
+```
+
+The earlier copy at `Robbie1977/VFB3-MCP` is archived at v1.3.0 and is not maintained; use this repository and the URL above.
+
+This server provides tools to query VFB data, run queries, and search for terms. In HTTP mode it runs statelessly (no session tracking), so any replica can handle any request and standard load balancing works.
 
 ## 🚀 Quick Start
 
@@ -156,6 +167,8 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `resolve_combination` — Resolve an unresolved split-GAL4 combination name or synonym into its component IDs
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters, returned as a strongest-first page plus a summary computed over every connection found
+- `get_predicted_neurotransmitters` — Predicted neurotransmitter(s) for a neuron class (and its subclasses) from per-instance connectome predictions, per instance or aggregated with mean confidence, optionally split by dataset
+- `get_known_neurotransmitters` — Known (curated) neurotransmitter(s) for a neuron class and its subclasses, from the ontology classification (no confidence)
 - `get_hierarchy` — Traverse the ontology hierarchy for a VFB ID: `part_of` (region/tissue structure) and/or `subclass_of` (cell-type taxonomy), ancestors and/or descendants
 - `lookup_xref` — Map a VFB ID to its external database accessions, or a confirmed external accession (a hemibrain/FAFB/MANC bodyId, a CATMAID skeleton id) back to the VFB term that carries it. Use this rather than `search_terms` for any accession
 - `combine_queries` — Boolean set algebra (`AND`, `OR`, `NOT`, `XOR`, …) over the results of two or more queries, with a step trace and a plain-English reading of the expression it parsed
@@ -294,7 +307,7 @@ Execute predefined queries on VFB data.
 
 The response reports `count_status` alongside `count`: `exact` (count is the true total), `row_count` (no total supplied — count is just the rows returned), or `unavailable` (the query failed upstream and count is `-1`). A `-1` is an error indication, **not** an empty result set, and `_note` says so in words.
 
-FlyBase stocks and split-GAL4 combination publications are run_query query_types too: `FindStocks` and `FindComboPublications`.
+FlyBase stocks and split-GAL4 combination publications are run_query query_types too: `FindStocks` and `FindComboPublications`. `FindStocks` takes FlyBase feature, stock and strain (FBsn) IDs. For a split combination (FBco), `FindStocks` returns stocks with both hemidrivers where they exist, and otherwise falls back to stocks of each hemidriver; a `match` column says which.
 
 ### search_terms
 Search for VFB terms. This calls VFBquery's `/search`, which is the search virtualflybrain.org itself runs — the same Solr query, the same filters and boosts, the same final sort — so a result here is the result a user would see on the site. Deprecated terms are already excluded server-side; there is no need to ask for that.
@@ -331,6 +344,22 @@ Query synaptic connectivity between neuron classes across all connectome dataset
 - `exclude_dbs` (array, optional): Dataset symbols to exclude (recommended `["hb","fafb"]`); see `list_connectome_datasets`
 - `limit` (number, optional): Rows to return, strongest first (default 50; `0` for all)
 - `offset` (number, optional): Row to start from within the ranking (default 0)
+
+### get_predicted_neurotransmitters
+Predicted neurotransmitter(s) for a neuron class — itself or any subclass — from per-instance connectome predictions (each reconstructed neuron carries a predicted transmitter with a confidence). Aggregated to flat per-class rows by default (one per cell type × neurotransmitter, with `instances`, `percent_of_class`, `mean_confidence`); `aggregate=false` gives one row per neuron. `split_by_dataset=true` adds a `dataset` column so agreement across connectomes is visible. The neurotransmitter is a GO secretion term (`nt_id`/`nt_label`) — the same id space as `get_known_neurotransmitters`. Distinct from `get_known_neurotransmitters`, which is the curated classification without confidence.
+
+**Parameters:**
+- `neuron_type` (string, required): Neuron class OWL ID or label (means the class and its subclasses)
+- `aggregate` (boolean, optional): `true` (default) for per-class rows; `false` for per-instance rows
+- `split_by_dataset` (boolean, optional): `true` (aggregate only) for one row per (cell type, neurotransmitter, dataset)
+- `exclude_dbs` (array, optional): Dataset symbols to exclude (default `["hb","fafb"]`; `[]` for all)
+- `min_confidence` (number, optional): Drop predictions below this confidence (0..1)
+
+### get_known_neurotransmitters
+Known (curated) neurotransmitter(s) for a neuron class and its subclasses, from the ontology's classification rather than per-instance predictions — so no confidence. One row per (cell type, neurotransmitter): `{cell_type_id, cell_type, nt_id, nt_label}`, with `nt_id` a GO secretion term. Empty when the ontology asserts none (try `get_predicted_neurotransmitters` for the data-driven answer).
+
+**Parameters:**
+- `neuron_type` (string, required): Neuron class OWL ID or label (means the class and its subclasses)
 
 ### resolve_entity
 Resolve an unresolved FlyBase-related query string into VFB/FlyBase IDs and metadata. This is *not* VFB term search: it takes the raw text a user wrote and works down a tiered resolution (exact name → synonym → broad pattern match). Pass driver lines, transgene names, cell-type labels and gene symbols — `P{VT054895-GAL4.DBD}`, `Hb9-GAL4`, `SS04495`, `MB002B`, `PAM cluster`, `dpp`.
