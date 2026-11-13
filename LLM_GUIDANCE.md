@@ -941,7 +941,7 @@ npm install -g @google/gemini-cli
 
 Add the VFB Server: Use the add command with the VFB URL.
 ```bash
-gemini mcp add vfb https://vfb3-mcp.virtualflybrain.org
+gemini mcp add vfb https://mcp.virtualflybrain.org
 ```
 
 Verify & Use: Run the CLI by typing `gemini`. Check the connection with `/mcp`. AI on Google Search will then call VFB's neuroanatomy and connectivity tools when questions about Drosophila are asked. 

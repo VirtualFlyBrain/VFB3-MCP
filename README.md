@@ -3,10 +3,10 @@
 A Model Context Protocol (MCP) server for Virtual Fly Brain (VFB): query *Drosophila melanogaster* neuroanatomy, connectomics, expression and reagent data from Claude, Copilot or any other MCP client.
 
 **Canonical repository:** [VirtualFlyBrain/VFB3-MCP](https://github.com/VirtualFlyBrain/VFB3-MCP) (this one) — maintained by the Virtual Fly Brain team.
-**Hosted service:** `https://vfb3-mcp.virtualflybrain.org` — no installation, no API key, no account.
+**Hosted service:** `https://mcp.virtualflybrain.org` — no installation, no API key, no account. (The older address `https://vfb3-mcp.virtualflybrain.org` is the same server and keeps working.)
 
 ```bash
-claude mcp add --transport http virtual-fly-brain https://vfb3-mcp.virtualflybrain.org
+claude mcp add --transport http virtual-fly-brain https://mcp.virtualflybrain.org
 ```
 
 The earlier copy at `Robbie1977/VFB3-MCP` is archived at v1.3.0 and is not maintained; use this repository and the URL above.
@@ -17,7 +17,7 @@ This server provides tools to query VFB data, run queries, and search for terms.
 
 ### Use the Live Service (Recommended)
 
-The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-mcp.virtualflybrain.org`. This requires no installation or setup on your machine.
+The easiest way to use VFB3-MCP is through our hosted service at `https://mcp.virtualflybrain.org`. This requires no installation or setup on your machine.
 
 #### Claude Desktop Setup
 
@@ -26,7 +26,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 3. **Add a new MCP server** with these settings:
    - **Server Name**: `virtual-fly-brain` (or any name you prefer)
    - **Type**: HTTP
-   - **Server URL**: `https://vfb3-mcp.virtualflybrain.org`
+   - **Server URL**: `https://mcp.virtualflybrain.org`
 
 **Configuration JSON** (alternative method):
 ```json
@@ -34,7 +34,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
   "mcpServers": {
     "virtual-fly-brain": {
       "type": "http",
-      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "url": "https://mcp.virtualflybrain.org",
       "tools": ["*"]
     }
   }
@@ -53,7 +53,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
   "mcpServers": {
     "virtual-fly-brain": {
       "type": "http",
-      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "url": "https://mcp.virtualflybrain.org",
       "tools": ["*"]
     }
   }
@@ -68,7 +68,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 2. **Open Settings** (`Ctrl/Cmd + ,`)
 3. **Search for "MCP"** in the settings search
 4. **Find the MCP Servers setting**
-5. **Add the server URL**: `https://vfb3-mcp.virtualflybrain.org`
+5. **Add the server URL**: `https://mcp.virtualflybrain.org`
 6. **Give it a name** like "Virtual Fly Brain"
 
 **Alternative JSON configuration** (in `mcp.json`):
@@ -77,7 +77,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
   "servers": {
     "virtual-fly-brain": {
       "type": "http",
-      "url": "https://vfb3-mcp.virtualflybrain.org"
+      "url": "https://mcp.virtualflybrain.org"
     }
   }
 }
@@ -91,7 +91,7 @@ The easiest way to use VFB3-MCP is through our hosted service at `https://vfb3-m
 4. **Choose "HTTP"** as the server type
 5. **Enter the server details**:
    - **Name**: `virtual-fly-brain`
-   - **URL**: `https://vfb3-mcp.virtualflybrain.org`
+   - **URL**: `https://mcp.virtualflybrain.org`
 6. **Save and restart** VS Code if prompted
 
 #### Other MCP Clients
@@ -103,7 +103,7 @@ For any MCP-compatible client that supports HTTP servers:
   "mcpServers": {
     "virtual-fly-brain": {
       "type": "http",
-      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "url": "https://mcp.virtualflybrain.org",
       "tools": ["*"]
     }
   }
