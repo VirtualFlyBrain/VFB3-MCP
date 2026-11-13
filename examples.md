@@ -429,7 +429,7 @@ Add to your MCP server configuration:
   "mcpServers": {
     "vfb3-mcp": {
       "type": "http",
-      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "url": "https://mcp.virtualflybrain.org",
       "tools": ["*"]
     }
   }
@@ -443,7 +443,7 @@ Add to your `claude.json`:
   "mcpServers": {
     "vfb3-mcp": {
       "type": "http",
-      "url": "https://vfb3-mcp.virtualflybrain.org",
+      "url": "https://mcp.virtualflybrain.org",
       "tools": ["*"]
     }
   }
@@ -451,7 +451,7 @@ Add to your `claude.json`:
 ```
 
 ### GitHub Copilot
-Configure the MCP server URL in your Copilot settings pointing to `https://vfb3-mcp.virtualflybrain.org`.
+Configure the MCP server URL in your Copilot settings pointing to `https://mcp.virtualflybrain.org`.
 
 ### Gemini
 
@@ -470,7 +470,7 @@ npm install -g @google/gemini-cli
 
 Add the VFB Server: Use the add command with the VFB URL.
 ```bash
-gemini mcp add vfb https://vfb3-mcp.virtualflybrain.org
+gemini mcp add vfb https://mcp.virtualflybrain.org
 ```
 
 Verify & Use: Run the CLI by typing `gemini`. Check the connection with `/mcp`. AI on Google Search will then call VFB's neuroanatomy and connectivity tools when questions about Drosophila are asked. 

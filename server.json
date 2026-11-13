@@ -13,7 +13,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://vfb3-mcp.virtualflybrain.org"
+      "url": "https://mcp.virtualflybrain.org"
     }
   ]
 }
