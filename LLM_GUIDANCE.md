@@ -485,6 +485,7 @@ There are **six** connectivity query types. Pick the right one using the decisio
 - To see upstream partner classes → use `run_query` with query_type `UpstreamClassConnectivity` (fast, pre-indexed)
 - To see region connectivity or neurotransmitter inputs for a neuron class → use the instance batch workflow described below
 - To filter by **both** upstream AND downstream class at the same time, or to retrieve results that include data from multiple connectome datasets → use `query_connectivity` (slow, live query)
+- To find **indirect routes** from one class to another ("how does X reach Y?", "what pathways lead from X to Y?", "is there a circuit from X to Y?") → use `find_circuit_paths` (fast, precomputed). It needs FBbt/VFB ids, so resolve names with `search_terms` first.
 - Call `list_connectome_datasets` first when you need the available connectome dataset labels/IDs (e.g. to populate `query_connectivity`'s dataset filters, or to tell the user which connectomes exist).
 
 **Instance batch workflow — running individual neuron queries at the class level:**
@@ -519,6 +520,7 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 | `DownstreamClassConnectivity` | Neuron class FBbt ID | Downstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `UpstreamClassConnectivity` | Neuron class FBbt ID | Upstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `query_connectivity` | Neuron class names or FBbt IDs | Connections between two neuron classes (includes data from all datasets) | Slow (1–5 min, live) |
+| `find_circuit_paths` | FBbt class IDs or VFB neuron IDs (not labels) | Ranked multi-hop pathways from one class/neuron to another, per dataset | Fast (precomputed) |
 | `get_predicted_neurotransmitters` | Neuron class name or FBbt ID | Predicted NT(s) per class (or per instance), with mean confidence, as GO terms; optional per-dataset split | Live (seconds) |
 | `get_known_neurotransmitters` | Neuron class name or FBbt ID | Curated NT(s) for the class and subclasses, as GO terms (no confidence) | Live (seconds) |
 
@@ -594,6 +596,31 @@ Note that a class label may be several names joined with `|` — a neuron that i
 - Use `group_by_class=true` for faster aggregated results.
 - Only use `query_connectivity` when you need both ends filtered by class.
 
+#### For `find_circuit_paths` (multi-hop pathways)
+
+Use it when the user asks how one cell type reaches another through intermediate neurons. For a direct connection between two classes use `query_connectivity`; for "what is downstream of X" use `DownstreamClassConnectivity`.
+
+1. **Get ids.** It takes FBbt class ids or VFB neuron ids only. Resolve names with `search_terms` (`filter_types: ["neuron","class"]`). A broad class (e.g. Kenyon cell) is fine: it expands to the leaf classes beneath it, listed under each dataset's `sources`/`targets`.
+2. **Call it with the defaults** (`k` 5, `min_synapses` 5, `exclude_dbs` omitted = `["hb","fafb"]`). It is fast, so there is no need to confirm parameters first.
+3. **If nothing is found:** check `warnings` and `found_in` (a term absent from a dataset gives no paths there), then try `min_synapses: 1`, then `exclude_dbs: []`. Tell the user what you changed.
+
+**Reading the result.**
+- `datasets` has one block per connectome; paths are never mixed across datasets. `shared_class_paths` lists class paths found in more than one dataset; lead with these when they exist, as they are the most robust.
+- `score` is the product of the steps' input proportions (`inprop_in`: the fraction of the downstream class's synaptic input coming from the upstream class). Rank and compare paths within a dataset; don't present a score as a probability or an absolute strength. A 3-step path at 0.1 per step scores 0.001.
+- Each edge also gives `synapses` and `pairs` (connected neuron pairs), which are useful to quote.
+- `level` is `class` when both ends are classes and `neuron` when either end is a VFB neuron id.
+- `neurons_left_out`: neurons with no single leaf cell type in that dataset are not in the class graph. If a path the user expects is missing, this may be why.
+- `instances` (with `instance_graph: true`): the best individual-neuron chains along a class path, as VFB ids.
+
+**Why the numbers differ from `query_connectivity`.** `find_circuit_paths` counts each neuron once, under its most specific cell type, and keeps datasets apart. `query_connectivity` with `group_by_class` rolls each connection up to every ancestor class and pools datasets. Both are correct for their purpose; don't compare their figures directly, and say which one you used.
+
+**Presenting.** Start with the query (source, target, datasets searched, data release from `run`), then the top paths as class chains with their scores, e.g.:
+```
+FlyWire (fw):
+1. LC12 → PVLP100 → DNp01 (giant fiber)   score 7.8e-4   (2614 then 29 synapses)
+2. ...
+```
+
 ### Step 3: Present Results
 
 **Always start with a query summary:**
@@ -642,6 +669,7 @@ For `query_connectivity` the summary stats are already computed for you over the
 - "To see which brain regions this neuron connects to, I can run a region connectivity query."
 - "To find what connects *back* to this type, I can swap upstream/downstream."
 - "To aggregate by neuron class, I can re-run with group_by_class=true."
+- "To see the individual neurons along a circuit path, I can re-run find_circuit_paths with instance_graph=true."
 - "You can view any neuron at `https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
 
 ---
@@ -908,6 +936,7 @@ A term is a template brain if its `SuperTypes` array from `get_term_info` includ
 - Connectivity (individual neuron): Search with `filter_types: ["has_neuron_connectivity"]` → `get_term_info` → `run_query` with `NeuronNeuronConnectivityQuery`
 - Connectivity (neuron class): Search with `filter_types: ["neuron", "class"]` → `run_query` with `DownstreamClassConnectivity` or `UpstreamClassConnectivity`
 - Connectivity (class-to-class): Search with `filter_types: ["neuron", "class"]` → `query_connectivity` (both upstream and downstream types)
+- Circuit paths (multi-hop): Search with `filter_types: ["neuron", "class"]` → `find_circuit_paths` (source and target ids)
 - Brain region structure: Search with `filter_types: ["anatomy"]` → `get_hierarchy` with `relationship: "part_of"`
 - Cell type hierarchy: Search with `filter_types: ["neuron", "class"]` → `get_hierarchy` with `relationship: "subclass_of"`
 - Datasets: Search with `filter_types: ["dataset"]` to find available datasets

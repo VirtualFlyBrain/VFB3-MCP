@@ -180,6 +180,7 @@ The server integrates with VirtualFlyBrain APIs:
 - **Search API**: `https://v3-cached.virtualflybrain.org/search`
 - **Facet vocabulary API**: `https://v3-cached.virtualflybrain.org/facets`
 - **Connectivity API**: `https://v3-cached.virtualflybrain.org/query_connectivity`
+- **Circuit paths API**: `https://v3-cached.virtualflybrain.org/circuit_paths` (routed to the separate `vfbquery-circuit` deployment, not cached; `VFBQUERY_CIRCUIT_BASE` overrides the host)
 - **Hierarchy API**: `https://v3-cached.virtualflybrain.org/get_hierarchy`
 - **Entity resolution APIs**: `https://v3-cached.virtualflybrain.org/resolve_entity`, `/resolve_combination`
 - **Connectome dataset list**: `https://v3-cached.virtualflybrain.org/list_connectome_datasets`
@@ -264,6 +265,23 @@ deterministic — the same logical pair of classes comes back as `"A|B"` on one 
 `"B|A"` on the next. Left alone that splits one class pair across several summary rows
 and inflates `distinct_class_pairs`. The parts are sorted before keying, which gives one
 stable spelling per label set.
+
+#### find_circuit_paths
+- **Input**: `source`, `target` (id or array of ids), `k`, `min_synapses`, `min_inprop`, `normalise`, `exclude_dbs`, `instance_graph`, `instance_k`
+- **Output**: the `/circuit_paths` response passed through as compact JSON: `{run, built, query, excluded_dbs, found_in, datasets[{dataset, label, symbol, level, sources, targets, neurons_left_out, paths[{score, hops, nodes, edges, instances?}], note?}], shared_class_paths, seconds, warnings?}`
+- **API Call**: GET `/circuit_paths`, 1-minute timeout
+
+Request building is in `src/circuitPaths.ts` (unit tested in `tests/circuitPaths.test.js`).
+The endpoint takes ids only and reports a label as "not found in any searched dataset",
+which reads like "no connection", so labels are refused before the request with a pointer
+to `search_terms`. Numeric options are range-checked against the endpoint's limits.
+`exclude_dbs` omitted leaves the endpoint's default (`hb`, `fafb`); `[]` sends an empty
+value, which searches everything. A `503` means the service has no graphs loaded yet
+(it is starting, or a release failed to load) and is reported as "temporarily
+unavailable", not as an empty result.
+
+The output is compact rather than indented: every node carries id, label and symbol, and
+with every dataset and `instance_graph` an indented response runs to hundreds of KB.
 
 #### resolve_entity / resolve_combination
 - **Input**: `name` — the raw, unresolved string as the user wrote it
