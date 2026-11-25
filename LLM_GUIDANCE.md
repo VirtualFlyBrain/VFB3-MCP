@@ -610,6 +610,7 @@ Use it when the user asks how one cell type reaches another through intermediate
 - Each edge also gives `synapses` and `pairs` (connected neuron pairs), which are useful to quote.
 - `level` is `class` when both ends are classes and `neuron` when either end is a VFB neuron id.
 - `neurons_left_out`: neurons with no single leaf cell type in that dataset are not in the class graph. If a path the user expects is missing, this may be why.
+- In neuron-level paths, a neuron left out of the class graph has `class: null`, `status` (`no_leaf`: typed only to general classes; `multi_leaf`: several leaf types; `only_axis`: only transmitter, lineage or similar classes; `untyped`) and `types` (`[{id, label}]`). Name it by its types rather than calling it untyped.
 - `instances` (with `instance_graph: true`): the best individual-neuron chains along a class path, as VFB ids.
 
 **Why the numbers differ from `query_connectivity`.** `find_circuit_paths` counts each neuron once, under its most specific cell type, and keeps datasets apart. `query_connectivity` with `group_by_class` rolls each connection up to every ancestor class and pools datasets. Both are correct for their purpose; don't compare their figures directly, and say which one you used.
