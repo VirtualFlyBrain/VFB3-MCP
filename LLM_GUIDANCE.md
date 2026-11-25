@@ -520,7 +520,7 @@ The `run_query` tool accepts an array of IDs and runs the query on all of them i
 | `DownstreamClassConnectivity` | Neuron class FBbt ID | Downstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `UpstreamClassConnectivity` | Neuron class FBbt ID | Upstream partner classes with % connected, avg weight (includes data from all datasets) | Fast (pre-indexed) |
 | `query_connectivity` | Neuron class names or FBbt IDs | Connections between two neuron classes (includes data from all datasets) | Slow (1–5 min, live) |
-| `find_circuit_paths` | FBbt class IDs or VFB neuron IDs (not labels) | Ranked multi-hop pathways from one class/neuron to another, per dataset | Fast (precomputed) |
+| `find_circuit_paths` | FBbt class IDs or VFB neuron IDs (not labels) | Ranked multi-hop pathways from one class/neuron to another, per dataset | Fast (precomputed); tens of seconds with `instance_graph` |
 | `get_predicted_neurotransmitters` | Neuron class name or FBbt ID | Predicted NT(s) per class (or per instance), with mean confidence, as GO terms; optional per-dataset split | Live (seconds) |
 | `get_known_neurotransmitters` | Neuron class name or FBbt ID | Curated NT(s) for the class and subclasses, as GO terms (no confidence) | Live (seconds) |
 
@@ -601,7 +601,7 @@ Note that a class label may be several names joined with `|` — a neuron that i
 Use it when the user asks how one cell type reaches another through intermediate neurons. For a direct connection between two classes use `query_connectivity`; for "what is downstream of X" use `DownstreamClassConnectivity`.
 
 1. **Get ids.** It takes FBbt class ids or VFB neuron ids only. Resolve names with `search_terms` (`filter_types: ["neuron","class"]`). A broad class (e.g. Kenyon cell) is fine: it expands to the leaf classes beneath it, listed under each dataset's `sources`/`targets`.
-2. **Call it with the defaults** (`k` 5, `min_synapses` 5, `exclude_dbs` omitted = `["hb","fafb"]`). It is fast, so there is no need to confirm parameters first.
+2. **Call it with the defaults** (`k` 5, `min_synapses` 5, `exclude_dbs` omitted = `["hb","fafb"]`, `instance_graph` off). It is fast, so there is no need to confirm parameters first.
 3. **If nothing is found:** check `warnings` and `found_in` (a term absent from a dataset gives no paths there), then try `min_synapses: 1`, then `exclude_dbs: []`. Tell the user what you changed.
 
 **Reading the result.**
@@ -611,7 +611,7 @@ Use it when the user asks how one cell type reaches another through intermediate
 - `level` is `class` when both ends are classes and `neuron` when either end is a VFB neuron id.
 - `neurons_left_out`: neurons with no single leaf cell type in that dataset are not in the class graph. If a path the user expects is missing, this may be why.
 - In neuron-level paths, a neuron left out of the class graph has `class: null`, `status` (`no_leaf`: typed only to general classes; `multi_leaf`: several leaf types; `only_axis`: only transmitter, lineage or similar classes; `untyped`) and `types` (`[{id, label}]`). Name it by its types rather than calling it untyped.
-- `instances` (with `instance_graph: true`): the best individual-neuron chains along a class path, as VFB ids.
+- `instances` (with `instance_graph: true`): the best individual-neuron chains along a class path, as VFB ids. This takes tens of seconds on the large connectomes, so only set it when the user asks about individual neurons, with `k` at most 5 and `instance_k` at most 3.
 
 **Why the numbers differ from `query_connectivity`.** `find_circuit_paths` counts each neuron once, under its most specific cell type, and keeps datasets apart. `query_connectivity` with `group_by_class` rolls each connection up to every ancestor class and pools datasets. Both are correct for their purpose; don't compare their figures directly, and say which one you used.
 
@@ -670,7 +670,7 @@ For `query_connectivity` the summary stats are already computed for you over the
 - "To see which brain regions this neuron connects to, I can run a region connectivity query."
 - "To find what connects *back* to this type, I can swap upstream/downstream."
 - "To aggregate by neuron class, I can re-run with group_by_class=true."
-- "To see the individual neurons along a circuit path, I can re-run find_circuit_paths with instance_graph=true."
+- "To see the individual neurons along a circuit path, I can re-run find_circuit_paths with instance_graph=true (this takes up to a minute)."
 - "You can view any neuron at `https://v3.virtualflybrain.org/org.geppetto.frontend/geppetto?id={ID}`"
 
 ---

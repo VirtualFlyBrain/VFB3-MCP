@@ -21,6 +21,14 @@ export const CIRCUIT_DEFAULTS = {
 export const CIRCUIT_MAX_K = 20;
 export const CIRCUIT_MAX_INSTANCE_K = 10;
 
+// instance_graph searches the neuron graph along every class path and takes
+// tens of seconds on the large connectomes (22 s for LC12 -> giant fiber at the
+// defaults; k=20, instance_k=10 ran past the handler's 60 s timeout). The server
+// carries on after the client gives up, so keep requests small until it has a
+// time limit (VFBquery#114).
+export const CIRCUIT_INSTANCE_MAX_K = 5;
+export const CIRCUIT_INSTANCE_MAX_INSTANCE_K = 3;
+
 export interface CircuitPathsArgs {
   source?: string | string[];
   target?: string | string[];
@@ -61,6 +69,18 @@ export function buildCircuitParams(args: CircuitPathsArgs): CircuitRequest {
         + 'Use search_terms with filter_types ["neuron","class"] to find the FBbt id of a neuron type, '
         + 'then call find_circuit_paths with that id.',
     };
+  }
+
+  if (args.instance_graph) {
+    const tooBig = ([['k', CIRCUIT_INSTANCE_MAX_K], ['instance_k', CIRCUIT_INSTANCE_MAX_INSTANCE_K]] as const)
+      .filter(([name, max]) => args[name] !== undefined && args[name] !== null && Number(args[name]) > max)
+      .map(([name, max]) => `${name} at most ${max}`);
+    if (tooBig.length) {
+      return {
+        error: `With instance_graph=true, use ${tooBig.join(' and ')}: neuron chains take tens of seconds `
+          + 'on the large connectomes. For more class paths, call again without instance_graph.',
+      };
+    }
   }
 
   const params = new URLSearchParams();

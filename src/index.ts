@@ -13,7 +13,7 @@ import express from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import { shapeRunQueryResult, runQueryFailed } from './runQueryShape.js';
 import { shapeCombineResult, shapeXrefResult } from './combineShape.js';
-import { buildCircuitParams, CircuitPathsArgs, CIRCUIT_MAX_K, CIRCUIT_MAX_INSTANCE_K } from './circuitPaths.js';
+import { buildCircuitParams, CircuitPathsArgs, CIRCUIT_MAX_K, CIRCUIT_INSTANCE_MAX_K, CIRCUIT_INSTANCE_MAX_INSTANCE_K } from './circuitPaths.js';
 
 // Version is single-sourced from package.json so a release tag (forced into
 // package.json by CI before the build) flows straight into serverInfo.
@@ -418,7 +418,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
         },
         {
           name: 'find_circuit_paths',
-          description: 'Find the strongest multi-hop synaptic pathways from one Drosophila neuron class (or neuron) to another, e.g. "how does LC12 reach the giant fiber?" or "what routes lead from DA1 ORNs to MBON01?". Answers from precomputed graphs, so it is fast (well under a few seconds). Use this for indirect routes; for direct connections between two classes use query_connectivity, and for one-sided partner lists use run_query with UpstreamClassConnectivity / DownstreamClassConnectivity. INPUT: ids only — FBbt class ids, or VFB ids for individual neurons; labels are refused, so resolve names with search_terms (filter_types ["neuron","class"]) first. Several ids per end are allowed. SCORING: each step is weighted by its input proportion (inprop_in: the fraction of the downstream class\'s total synaptic input that comes from the upstream class); a path\'s score is the product of its steps, so a 3-step path at 0.1 per step scores 0.001. Paths are ranked best first; scores are comparable within a dataset, not as absolute strengths. normalise="output" uses the fraction of the upstream class\'s output instead. HOW CLASSES ARE COUNTED: each neuron is assigned to its single most specific (leaf) cell type in that connectome, so broad classes do not act as shortcuts. A broad term such as "Kenyon cell" expands to the leaf classes beneath it (listed under sources/targets). Neurons with no leaf type, or more than one, are left out (neurons_left_out counts them). They can still appear in neuron-level paths, as nodes with class null plus status (no_leaf: only general types; multi_leaf: several leaf types; only_axis: only transmitter/lineage-type classes; untyped) and types (the most specific types they do have). Because of this the figures differ from query_connectivity with group_by_class=true, which rolls connections up to every ancestor class and pools datasets: do not compare the two numbers directly. LEVELS: if both ends are classes the search runs on the class graph; if either end is a VFB neuron id, it runs on the neuron graph (class ends expand to their neurons). DATASETS: each connectome is searched separately and reported in its own block; shared_class_paths lists class paths found in more than one dataset, which are the most robust. instance_graph=true adds the best individual-neuron chains along each class path. RECOMMENDED DEFAULTS: k=5, min_synapses=5, exclude_dbs omitted (= ["hb","fafb"]). If no paths are found, try min_synapses=1, then exclude_dbs=[]. Every response names the data release (run) it came from.',
+          description: 'Find the strongest multi-hop synaptic pathways from one Drosophila neuron class (or neuron) to another, e.g. "how does LC12 reach the giant fiber?" or "what routes lead from DA1 ORNs to MBON01?". Answers from precomputed graphs, so class and neuron paths take a second or two. Use this for indirect routes; for direct connections between two classes use query_connectivity, and for one-sided partner lists use run_query with UpstreamClassConnectivity / DownstreamClassConnectivity. INPUT: ids only — FBbt class ids, or VFB ids for individual neurons; labels are refused, so resolve names with search_terms (filter_types ["neuron","class"]) first. Several ids per end are allowed. SCORING: each step is weighted by its input proportion (inprop_in: the fraction of the downstream class\'s total synaptic input that comes from the upstream class); a path\'s score is the product of its steps, so a 3-step path at 0.1 per step scores 0.001. Paths are ranked best first; scores are comparable within a dataset, not as absolute strengths. normalise="output" uses the fraction of the upstream class\'s output instead. HOW CLASSES ARE COUNTED: each neuron is assigned to its single most specific (leaf) cell type in that connectome, so broad classes do not act as shortcuts. A broad term such as "Kenyon cell" expands to the leaf classes beneath it (listed under sources/targets). Neurons with no leaf type, or more than one, are left out (neurons_left_out counts them). They can still appear in neuron-level paths, as nodes with class null plus status (no_leaf: only general types; multi_leaf: several leaf types; only_axis: only transmitter/lineage-type classes; untyped) and types (the most specific types they do have). Because of this the figures differ from query_connectivity with group_by_class=true, which rolls connections up to every ancestor class and pools datasets: do not compare the two numbers directly. LEVELS: if both ends are classes the search runs on the class graph; if either end is a VFB neuron id, it runs on the neuron graph (class ends expand to their neurons). DATASETS: each connectome is searched separately and reported in its own block; shared_class_paths lists class paths found in more than one dataset, which are the most robust. instance_graph=true adds the best individual-neuron chains along each class path, but takes tens of seconds on the large connectomes: use it only when the user asks about individual neurons, and then with k at most 5 and instance_k at most 3. RECOMMENDED DEFAULTS: k=5, min_synapses=5, exclude_dbs omitted (= ["hb","fafb"]). If no paths are found, try min_synapses=1, then exclude_dbs=[]. Every response names the data release (run) it came from.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -432,7 +432,7 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               },
               k: {
                 type: 'number',
-                description: `Paths to return per dataset, best first (default 5, max ${CIRCUIT_MAX_K}).`,
+                description: `Paths to return per dataset, best first (default 5, max ${CIRCUIT_MAX_K}; max ${CIRCUIT_INSTANCE_MAX_K} with instance_graph).`,
                 default: 5,
               },
               min_synapses: {
@@ -458,12 +458,12 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
               },
               instance_graph: {
                 type: 'boolean',
-                description: 'If true, add the best individual-neuron chains along each class path (instances). Slower (about a second). Default false.',
+                description: 'If true, add the best individual-neuron chains along each class path (instances). Slow: tens of seconds on the large connectomes, so only when the user asks about individual neurons. With it, k is at most 5 and instance_k at most 3. Default false.',
                 default: false,
               },
               instance_k: {
                 type: 'number',
-                description: `Neuron chains per class path when instance_graph is true (default 3, max ${CIRCUIT_MAX_INSTANCE_K}).`,
+                description: `Neuron chains per class path when instance_graph is true (default 3, max ${CIRCUIT_INSTANCE_MAX_INSTANCE_K}).`,
                 default: 3,
               },
             },

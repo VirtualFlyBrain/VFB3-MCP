@@ -361,8 +361,8 @@ Find the strongest multi-hop pathways from one neuron class (or neuron) to anoth
 - `min_inprop` (number, optional): Minimum input proportion per step (0..1, default 0)
 - `normalise` (string, optional): `input` (default) or `output`
 - `exclude_dbs` (array, optional): Dataset symbols to exclude (default `["hb","fafb"]`; `[]` for all)
-- `instance_graph` (boolean, optional): Add the best individual-neuron chains along each class path
-- `instance_k` (number, optional): Neuron chains per class path (default 3, max 10)
+- `instance_graph` (boolean, optional): Add the best individual-neuron chains along each class path. Slow: tens of seconds on the large connectomes. With it, `k` is at most 5 and `instance_k` at most 3
+- `instance_k` (number, optional): Neuron chains per class path (default 3, max 3)
 
 Set `VFBQUERY_CIRCUIT_BASE` to send these requests to another circuit server (e.g. a local one or p3) instead of `https://v3-cached.virtualflybrain.org`.
 
