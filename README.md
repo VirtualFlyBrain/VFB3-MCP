@@ -167,6 +167,7 @@ The MCP server exposes the following tools (available to assistants like Claude 
 - `resolve_combination` — Resolve an unresolved split-GAL4 combination name or synonym into its component IDs
 - `list_connectome_datasets` — List available connectome datasets (e.g., Hemibrain, FAFB)
 - `query_connectivity` — Query connectivity across connectome datasets using upstream/downstream filters, returned as a strongest-first page plus a summary computed over every connection found
+- `find_circuit_paths` — Strongest multi-hop pathways from one neuron class (or neuron) to another, searched in each connectome separately from precomputed class graphs
 - `get_predicted_neurotransmitters` — Predicted neurotransmitter(s) for a neuron class (and its subclasses) from per-instance connectome predictions, per instance or aggregated with mean confidence, optionally split by dataset
 - `get_known_neurotransmitters` — Known (curated) neurotransmitter(s) for a neuron class and its subclasses, from the ontology classification (no confidence)
 - `get_hierarchy` — Traverse the ontology hierarchy for a VFB ID: `part_of` (region/tissue structure) and/or `subclass_of` (cell-type taxonomy), ancestors and/or descendants
@@ -344,6 +345,26 @@ Query synaptic connectivity between neuron classes across all connectome dataset
 - `exclude_dbs` (array, optional): Dataset symbols to exclude (recommended `["hb","fafb"]`); see `list_connectome_datasets`
 - `limit` (number, optional): Rows to return, strongest first (default 50; `0` for all)
 - `offset` (number, optional): Row to start from within the ranking (default 0)
+
+### find_circuit_paths
+Find the strongest multi-hop pathways from one neuron class (or neuron) to another, e.g. LC12 → giant fiber. It answers from class-level graphs built with each data release (VFBquery circuit mode), so it takes well under a few seconds.
+
+- **Scoring:** each step is weighted by its input proportion (the fraction of the downstream class's synaptic input that comes from the upstream class). A path's score is the product of its steps, and paths are ranked best first. `normalise: "output"` uses the fraction of the upstream class's output instead.
+- **Classes:** each neuron counts towards its single most specific (leaf) cell type in that connectome, so broad classes don't act as shortcuts. A broad term expands to the leaf classes beneath it. Neurons with no leaf type, or more than one, are left out and counted in `neurons_left_out`. They can still appear in neuron-level paths, with `class: null` plus `status` (why) and `types` (the most specific types they have). The figures therefore differ from `query_connectivity` with `group_by_class`, which rolls connections up to every ancestor class and pools datasets.
+- **Datasets:** each connectome is searched separately; `shared_class_paths` lists class paths found in more than one.
+- **Levels:** class ids at both ends search the class graph; a VFB neuron id at either end searches the neuron graph.
+
+**Parameters:**
+- `source`, `target` (string or array, required): FBbt class ids or VFB neuron ids. Labels are refused; use `search_terms` first
+- `k` (number, optional): Paths per dataset (default 5, max 20)
+- `min_synapses` (number, optional): Minimum synapses per step (default 5)
+- `min_inprop` (number, optional): Minimum input proportion per step (0..1, default 0)
+- `normalise` (string, optional): `input` (default) or `output`
+- `exclude_dbs` (array, optional): Dataset symbols to exclude (default `["hb","fafb"]`; `[]` for all)
+- `instance_graph` (boolean, optional): Add the best individual-neuron chains along each class path
+- `instance_k` (number, optional): Neuron chains per class path (default 3, max 10)
+
+Set `VFBQUERY_CIRCUIT_BASE` to send these requests to another circuit server (e.g. a local one or p3) instead of `https://v3-cached.virtualflybrain.org`.
 
 ### get_predicted_neurotransmitters
 Predicted neurotransmitter(s) for a neuron class — itself or any subclass — from per-instance connectome predictions (each reconstructed neuron carries a predicted transmitter with a confidence). Aggregated to flat per-class rows by default (one per cell type × neurotransmitter, with `instances`, `percent_of_class`, `mean_confidence`); `aggregate=false` gives one row per neuron. `split_by_dataset=true` adds a `dataset` column so agreement across connectomes is visible. The neurotransmitter is a GO secretion term (`nt_id`/`nt_label`) — the same id space as `get_known_neurotransmitters`. Distinct from `get_known_neurotransmitters`, which is the curated classification without confidence.

@@ -13,6 +13,7 @@ import express from 'express';
 import { createHash, randomUUID } from 'node:crypto';
 import { shapeRunQueryResult, runQueryFailed } from './runQueryShape.js';
 import { shapeCombineResult, shapeXrefResult } from './combineShape.js';
+import { buildCircuitParams, CircuitPathsArgs, CIRCUIT_MAX_K, CIRCUIT_MAX_INSTANCE_K } from './circuitPaths.js';
 
 // Version is single-sourced from package.json so a release tag (forced into
 // package.json by CI before the build) flows straight into serverInfo.
@@ -416,6 +417,60 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           },
         },
         {
+          name: 'find_circuit_paths',
+          description: 'Find the strongest multi-hop synaptic pathways from one Drosophila neuron class (or neuron) to another, e.g. "how does LC12 reach the giant fiber?" or "what routes lead from DA1 ORNs to MBON01?". Answers from precomputed graphs, so it is fast (well under a few seconds). Use this for indirect routes; for direct connections between two classes use query_connectivity, and for one-sided partner lists use run_query with UpstreamClassConnectivity / DownstreamClassConnectivity. INPUT: ids only — FBbt class ids, or VFB ids for individual neurons; labels are refused, so resolve names with search_terms (filter_types ["neuron","class"]) first. Several ids per end are allowed. SCORING: each step is weighted by its input proportion (inprop_in: the fraction of the downstream class\'s total synaptic input that comes from the upstream class); a path\'s score is the product of its steps, so a 3-step path at 0.1 per step scores 0.001. Paths are ranked best first; scores are comparable within a dataset, not as absolute strengths. normalise="output" uses the fraction of the upstream class\'s output instead. HOW CLASSES ARE COUNTED: each neuron is assigned to its single most specific (leaf) cell type in that connectome, so broad classes do not act as shortcuts. A broad term such as "Kenyon cell" expands to the leaf classes beneath it (listed under sources/targets). Neurons with no leaf type, or more than one, are left out (neurons_left_out counts them). They can still appear in neuron-level paths, as nodes with class null plus status (no_leaf: only general types; multi_leaf: several leaf types; only_axis: only transmitter/lineage-type classes; untyped) and types (the most specific types they do have). Because of this the figures differ from query_connectivity with group_by_class=true, which rolls connections up to every ancestor class and pools datasets: do not compare the two numbers directly. LEVELS: if both ends are classes the search runs on the class graph; if either end is a VFB neuron id, it runs on the neuron graph (class ends expand to their neurons). DATASETS: each connectome is searched separately and reported in its own block; shared_class_paths lists class paths found in more than one dataset, which are the most robust. instance_graph=true adds the best individual-neuron chains along each class path. RECOMMENDED DEFAULTS: k=5, min_synapses=5, exclude_dbs omitted (= ["hb","fafb"]). If no paths are found, try min_synapses=1, then exclude_dbs=[]. Every response names the data release (run) it came from.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              source: {
+                oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+                description: 'Start of the path: FBbt class id(s) (e.g. "FBbt_00100484") or VFB neuron id(s) (e.g. "VFB_fw011554"). A broad class expands to its leaf classes. Not labels — use search_terms first.',
+              },
+              target: {
+                oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+                description: 'End of the path, in the same form as source.',
+              },
+              k: {
+                type: 'number',
+                description: `Paths to return per dataset, best first (default 5, max ${CIRCUIT_MAX_K}).`,
+                default: 5,
+              },
+              min_synapses: {
+                type: 'number',
+                description: 'Ignore class-to-class (or neuron-to-neuron) connections with fewer synapses than this (default 5). Lower to 1 if nothing is found.',
+                default: 5,
+              },
+              min_inprop: {
+                type: 'number',
+                description: 'Ignore steps whose input proportion is below this (0..1, default 0). Raise it (e.g. 0.01) to keep only substantial steps.',
+                default: 0,
+              },
+              normalise: {
+                type: 'string',
+                enum: ['input', 'output'],
+                description: '"input" (default): weight each step by the fraction of the downstream partner\'s input. "output": by the fraction of the upstream partner\'s output.',
+                default: 'input',
+              },
+              exclude_dbs: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Dataset symbols to leave out. Omit for the default (["hb","fafb"], as on query_connectivity); pass [] to search every dataset. Must be symbols from list_connectome_datasets — an unknown name is rejected.',
+              },
+              instance_graph: {
+                type: 'boolean',
+                description: 'If true, add the best individual-neuron chains along each class path (instances). Slower (about a second). Default false.',
+                default: false,
+              },
+              instance_k: {
+                type: 'number',
+                description: `Neuron chains per class path when instance_graph is true (default 3, max ${CIRCUIT_MAX_INSTANCE_K}).`,
+                default: 3,
+              },
+            },
+            required: ['source', 'target'],
+          },
+        },
+        {
           name: 'get_predicted_neurotransmitters',
           description: 'Get the PREDICTED neurotransmitter(s) for a Drosophila neuron class — itself or any subclass — from per-instance connectome predictions (each reconstructed neuron carries a predicted transmitter with a confidence). Use this for "what neurotransmitter does <cell type> use?" when you want the data-driven prediction and its confidence. By default results are aggregated to flat per-class rows (one per cell type × neurotransmitter) with instance counts, percent_of_class and mean_confidence; set aggregate=false for one row per individual neuron. Set split_by_dataset=true to get one row per (cell type, neurotransmitter, dataset) so you can see agreement across connectomes. The neurotransmitter is reported as a GO secretion term (nt_id/nt_label), the same id space as get_known_neurotransmitters. This is distinct from get_known_neurotransmitters, which returns the ontology-curated classification without confidence. CONSTRAINTS: neuron class terms only (FBbt id or label); use search_terms with filter_types ["neuron","class"] to canonicalize. RECOMMENDED: exclude_dbs defaults to ["hb","fafb"]; pass [] for all datasets.',
           inputSchema: {
@@ -591,6 +646,8 @@ function setupToolHandlers(server: Server, sessionIdHolder?: RequestContext) {
           return await handleListConnectomeDatasets();
         case 'query_connectivity':
           return await handleQueryConnectivity(args as { upstream_type?: string; downstream_type?: string; weight?: number; group_by_class?: boolean; exclude_dbs?: string[]; limit?: number; offset?: number });
+        case 'find_circuit_paths':
+          return await handleFindCircuitPaths(args as CircuitPathsArgs);
         case 'get_predicted_neurotransmitters':
           return await handleGetPredictedNeurotransmitters(args as { neuron_type: string; aggregate?: boolean; split_by_dataset?: boolean; exclude_dbs?: string[]; min_confidence?: number });
         case 'get_known_neurotransmitters':
@@ -1430,6 +1487,35 @@ async function handleQueryConnectivity(args: {
   }
 }
 
+// Circuit paths come from a separate small service (VFBquery circuit mode),
+// routed at /circuit_paths on the same host. VFBQUERY_CIRCUIT_BASE points the
+// tool elsewhere, e.g. a local or p3 circuit server for testing.
+const CIRCUIT_BASE = process.env.VFBQUERY_CIRCUIT_BASE || VFBQUERY_BASE;
+
+async function handleFindCircuitPaths(args: CircuitPathsArgs): Promise<{ content: Array<{ type: string; text: string }> }> {
+  const built = buildCircuitParams(args || {});
+  if ('error' in built) {
+    return { content: [{ type: 'text', text: `Error: ${built.error}` }] };
+  }
+  const url = `${CIRCUIT_BASE}/circuit_paths?${built.params.toString()}`;
+  console.error(`MCP Debug: find_circuit_paths params=${built.params.toString()}`);
+  try {
+    const response = await axios.get(url, { timeout: 60000 });
+    // Compact: every node carries id/label/symbol, and with every dataset and
+    // instance_graph an indented response runs to hundreds of KB.
+    return { content: [{ type: 'text', text: JSON.stringify(response.data) }] };
+  } catch (error: any) {
+    if (error?.response?.status === 503) {
+      return { content: [{ type: 'text', text: `Circuit paths are temporarily unavailable (the circuit graphs are not loaded yet). This is not a "no paths" result; try again in a minute. ${rejectionDetail(error) || ''}`.trim() }] };
+    }
+    const detail = rejectionDetail(error);
+    if (detail) {
+      return { content: [{ type: 'text', text: `Circuit path request rejected: ${detail}` }] };
+    }
+    return { content: [{ type: 'text', text: `Error finding circuit paths: ${error}` }] };
+  }
+}
+
 async function handleGetPredictedNeurotransmitters(args: {
   neuron_type: string;
   aggregate?: boolean;
@@ -1833,6 +1919,7 @@ function getHtmlPage(): string {
     <li><code>resolve_combination</code> - Resolve an unresolved split-GAL4 combination name or synonym to its underlying IDs</li>
     <li><code>list_connectome_datasets</code> - List available connectome datasets (e.g., Hemibrain, FAFB)</li>
     <li><code>query_connectivity</code> - Query connectivity across connectome datasets using upstream/downstream filters, paged with summary statistics</li>
+    <li><code>find_circuit_paths</code> - Strongest multi-hop pathways between neuron classes (or neurons), searched in each connectome separately from precomputed class graphs</li>
     <li><code>get_hierarchy</code> - Build a <code>part_of</code> or <code>subclass_of</code> hierarchy tree for a VFB term</li>
     <li><code>lookup_xref</code> - Map a VFB ID to its external database accessions, or a confirmed external accession (e.g. a hemibrain bodyId) back to the VFB term that carries it</li>
     <li><code>combine_queries</code> - Boolean set algebra (AND, OR, NOT, XOR&hellip;) over the results of two or more queries, with a step trace and a plain-English reading of the expression</li>
