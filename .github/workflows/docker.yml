@@ -25,6 +25,14 @@ jobs:
         jq --arg v "$VERSION" '.version = $v' package.json > package.tmp && mv package.tmp package.json
         jq --arg v "$VERSION" '.version = $v' server.json  > server.tmp  && mv server.tmp  server.json
 
+    # arm64 is built under QEMU. Pin it: the runner's own binfmt intermittently
+    # crashed npm ci with "Illegal instruction", hanging the job (v1.13.0 build).
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4
+      with:
+        image: tonistiigi/binfmt:qemu-v10.2.3
+        platforms: arm64
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
